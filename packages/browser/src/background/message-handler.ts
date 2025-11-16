@@ -249,6 +249,34 @@ const handle_get_tab_data = async (
   }
 }
 
+/**
+ * Handles Jules page scraping request
+ */
+const handle_scrape_jules_page = async (
+  callback: (response?: any) => void
+) => {
+  try {
+    const tabs = await browser.tabs.query({ active: true, currentWindow: true })
+    const tab = tabs[0]
+    if (!tab?.id) {
+      throw new Error('No active tab found')
+    }
+
+    // Send message to content script to scrape Jules page
+    const response = await browser.tabs.sendMessage(tab.id, {
+      action: 'scrape-jules-page'
+    })
+
+    callback(response)
+  } catch (error) {
+    console.error('Error scraping Jules page:', error)
+    callback({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    })
+  }
+}
+
 export const setup_message_listeners = () => {
   browser.runtime.onMessage.addListener(
     (message: any, _: any, sendResponse: any): any => {
@@ -267,6 +295,11 @@ export const setup_message_listeners = () => {
         } else if (message.action == 'get-tab-data') {
           handle_get_tab_data((tab_data) => {
             sendResponse(tab_data)
+          })
+          return true
+        } else if (message.action == 'scrape-jules-page') {
+          handle_scrape_jules_page((response) => {
+            sendResponse(response)
           })
           return true
         }

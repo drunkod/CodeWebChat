@@ -48,6 +48,11 @@
         "http://localhost/"
       ],
       "js": ["send-prompt-content-script.js"]
+    },
+    {
+      "matches": ["*://*.google.com/*/jules/*", "*://jules.google.com/*"],
+      "js": ["content-scripts/jules-scraper-content-script.js"],
+      "run_at": "document_idle"
     }
   ]
 }
