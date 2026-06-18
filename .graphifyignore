@@ -1,0 +1,82 @@
+# Graphify code-only corpus — offline/tree-sitter, no API key needed.
+# Excludes docs, prose, media, test fixtures, generated artifacts.
+
+# Graphify output
+graphify-out/
+.graphify-src/
+
+# VCS / editor / CI
+.git/
+.github/
+.husky/
+.vscode/
+.claude/
+
+# Dependencies / build outputs
+node_modules/
+dist/
+build/
+out/
+.next/
+coverage/
+
+# Plans / docs dirs
+docs/
+media/
+plans/
+apps/old-website/
+
+# Test fixture text files (clipboard-parser test cases)
+*.txt
+
+# Markdown / prose
+*.md
+*.mdx
+*.rst
+*.html
+
+# Images / media / fonts
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.webp
+*.ico
+*.bmp
+*.ttf
+*.otf
+*.woff
+*.woff2
+*.mp3
+*.mp4
+*.mov
+
+# Office / PDF
+*.pdf
+*.doc
+*.docx
+*.xls
+*.xlsx
+*.ppt
+*.pptx
+
+# Config/data (not code)
+*.yml
+*.yaml
+
+# Archives / binaries
+*.zip
+*.tar
+*.gz
+*.7z
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.class
+*.jar
+
+# Logs
+*.log
