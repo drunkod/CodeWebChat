@@ -5,6 +5,9 @@
 graphify-out/
 .graphify-src/
 
+# Cloned reference repo (repo-harness) — not part of CodeWebChat
+draft/
+
 # VCS / editor / CI
 .git/
 .github/

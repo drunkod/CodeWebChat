@@ -1,5 +1,9 @@
 # Step 6 — Upgrade the Protocol for V1
 
+> **Complete end-to-end reference code** for this step — including the minimal
+> browser-extension change that lets the browser send the reply inline so the MCP
+> server never reads the OS clipboard — is in **`06b-phase-c-reference-code.md`**.
+
 ## Goal
 
 Remove the two biggest V0 limitations:

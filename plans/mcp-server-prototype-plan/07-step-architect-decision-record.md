@@ -179,6 +179,80 @@ production chatbot DOMs.
 - 20+ chatbot integrations need per-chatbot `extract_response_text` implementations.
   Done incrementally: Claude, ChatGPT, Gemini first; the rest in follow-up PRs.
 - Existing VS Code clipboard flow is fully backward compatible.
+
+---
+
+## ADR-008: The MCP server hosts the WebSocket relay (Mode B) to replace the editor extension
+
+**Status:** Proposed
+**Date:** 2026-06
+
+### Context
+
+The WebSocket server on `localhost:55155` is hosted by the VS Code **editor**
+extension (`apps/editor/src/services/websocket-server-process.ts`). The browser
+extension is only a client of that port. Steps 1–4 build the MCP server as an
+additional **editor client** (Mode A), which means the VS Code extension must be
+running to host the server. That validates the browser handshake but does not
+replace the extension — the stated goal.
+
+### Decision
+
+Two phases:
+
+- **Phase A — client mode (Mode A):** keep Steps 1–4 as a validation harness. The
+  MCP server connects to the existing relay with token `gemini-coder-vscode`.
+  Requires VS Code running.
+- **Phase B — host mode (Mode B), the deliverable:** the MCP server *hosts* the
+  relay on 55155 itself (port the minimum of `WebSocketServer` per Step 2b). The
+  browser extension connects directly to the MCP server; VS Code is not involved.
+
+A `--mode host|client` flag selects between them; default `client` until host
+mode is validated. The two modes are mutually exclusive at runtime because only
+one process can bind 55155.
+
+### Consequences
+
+- Host mode adds a new failure code `CWC_PORT_IN_USE` (VS Code or a stale process
+  owns 55155).
+- `cwc_status` gains `mode` and `hosting` fields.
+- Most Step 2 client logic (serialization, clipboard guard, disconnect rejection)
+  is reused as the host's internal editor side; only the transport direction
+  changes. See `02b-step-host-websocket-relay.md`.
+- Definition of done: the Step 4 manual demo passes with the VS Code extension
+  **closed**.
+
+---
+
+## ADR-009: Long-running tool call strategy (blocking vs split send+poll)
+
+**Status:** Open — decide before finalizing the Step 3 tool schema
+**Date:** 2026-06
+
+### Context
+
+`send_to_codewebchat` blocks on an unbounded human action (clicking Apply
+Response). repo-harness has no pattern for this. See
+`08-adapt-from-repo-harness/07-blocking-human-in-the-loop.md`.
+
+### Decision
+
+To be chosen with the developer / based on the target MCP client's request
+timeout:
+
+- **Option A — single blocking call** with a bounded `timeout_ms`, returns
+  `CWC_TIMEOUT` if no click. Simple; risks the client's own request timeout and
+  model retries spamming the chatbot.
+- **Option C — split `send_to_codewebchat` + `poll_cwc_response`** (recommended):
+  send returns immediately with a ticket; poll returns when ready or after a
+  short capped wait. Survives client timeouts; more moving parts.
+
+This choice sets the tool input schema and error codes, so it must be locked
+before Step 3 is finalized.
+
+### Consequences
+
+- Decision recorded here once made; `guards.ts` and the Step 3 schema follow it.
 ```
 
 ---

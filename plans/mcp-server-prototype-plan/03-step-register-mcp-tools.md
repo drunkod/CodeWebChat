@@ -1,5 +1,11 @@
 # Step 3 — Register the MCP Tools
 
+> **Decision pending (ADR-009):** the blocking single-tool design below is
+> Option A. The recommended **Option C — split `send_to_codewebchat` +
+> `poll_cwc_response`** (survives MCP client request timeouts) has complete
+> reference code in **`03b-split-send-poll-reference-code.md`**. Decide before
+> finalizing this schema.
+
 ## Goal
 
 Expose a small, safe tool surface to MCP clients.
