@@ -18,6 +18,7 @@ The bridge must:
 6. Read the clipboard only after `apply-chat-response` arrives.
 7. Reject empty or unchanged clipboard text.
 8. Serialize calls so concurrent MCP tool calls do not race on the same `client_id` and clipboard.
+9. **Immediately reject any in-flight promise if the WebSocket closes**, so the MCP client receives a fast error instead of waiting for `timeout_ms` to expire.
 
 ## Complete file: `apps/mcp-server/src/cwc-bridge.ts`
 
@@ -77,7 +78,12 @@ export class CwcBridge {
   private readonly connect_timeout_ms: number
   private readonly clipboard_read_delay_ms: number
   private active_request: Promise<unknown> = Promise.resolve()
-  private pending_apply_response: ((message: ApplyChatResponseMessage) => void) | null = null
+
+  // FIX: store both resolve and reject so the close handler can abort in-flight requests
+  private pending_apply_response: {
+    resolve: (message: ApplyChatResponseMessage) => void
+    reject: (error: CwcMcpError) => void
+  } | null = null
 
   constructor(options: BridgeOptions) {
     this.ws_url = options.ws_url ?? `ws://localhost:${DEFAULT_CWC_PORT}`
@@ -133,7 +139,20 @@ export class CwcBridge {
         this.client_id = null
         this.browser_connected = false
         this.connected_browser_count = 0
-        this.pending_apply_response = null
+
+        // FIX: reject any in-flight sendPromptAndWait so it does not hang until timeout_ms.
+        // Previously pending_apply_response was set to null, silently dropping the rejection
+        // and leaving the caller's promise suspended until the 5-minute timeout fired.
+        if (this.pending_apply_response !== null) {
+          this.pending_apply_response.reject(
+            new CwcMcpError(
+              'CodeWebChat WebSocket closed while waiting for Apply Response. ' +
+                'The VS Code extension may have restarted. Retry the tool call.',
+              'CWC_DISCONNECTED'
+            )
+          )
+          this.pending_apply_response = null
+        }
       })
 
       ws.on('message', (raw) => {
@@ -230,7 +249,10 @@ export class CwcBridge {
 
     if (message.action === 'apply-chat-response') {
       const apply_response = message as ApplyChatResponseMessage
-      this.pending_apply_response?.(apply_response)
+      // Only resolve if client_id matches — guards against stale messages after reconnect
+      if (apply_response.client_id === this.client_id) {
+        this.pending_apply_response?.resolve(apply_response)
+      }
     }
   }
 
@@ -269,15 +291,41 @@ export class CwcBridge {
         )
       }, timeout_ms)
 
-      this.pending_apply_response = (message) => {
-        if (message.client_id !== client_id) return
-        clearTimeout(timer)
-        this.pending_apply_response = null
-        resolve(message)
+      // FIX: store both resolve and reject so ws.on('close') can abort this promise immediately
+      this.pending_apply_response = {
+        resolve: (message) => {
+          if (message.client_id !== client_id) return
+          clearTimeout(timer)
+          this.pending_apply_response = null
+          resolve(message)
+        },
+        reject: (error) => {
+          clearTimeout(timer)
+          this.pending_apply_response = null
+          reject(error)
+        }
       }
     })
   }
 }
+```
+
+## Key fix: disconnect while in-flight
+
+The original `ws.on('close')` handler set `pending_apply_response = null`, silently dropping
+the rejection path. The promise returned by `waitForApplyResponse` would remain suspended
+until `timeout_ms` (default 5 minutes) fired.
+
+The fix stores a `{ resolve, reject }` pair instead of a bare callback. The close handler
+calls `reject()` immediately with `CWC_DISCONNECTED`, propagating the error up through
+`sendPromptAndWait` and back to the MCP client in milliseconds:
+
+```
+ws.on('close')
+  → pending_apply_response.reject(CWC_DISCONNECTED)
+  → waitForApplyResponse rejects
+  → sendPromptAndWait rejects
+  → MCP tool returns isError: true with message
 ```
 
 ## Notes for the architect
@@ -286,3 +334,4 @@ export class CwcBridge {
 - Serialization avoids ambiguity because the current protocol has no per-request `request_id`.
 - The V0 bridge treats the clipboard as a transport fallback, not as a durable API.
 - V1 should include response text in the WebSocket payload and add `request_id` to both prompt and response messages.
+- The `clipboard_read_delay_ms` default of 250ms is safe: the browser extension already sleeps 500ms before sending `apply-chat-response`, so the clipboard is written before the signal arrives.
