@@ -12,19 +12,26 @@ send prompt -> browser chatbot opens -> user clicks Apply Response -> MCP tool r
 
 ## Build the server
 
-From the repository root:
+From the **repository root** (not inside `apps/mcp-server`):
 
 ```bash
-cd apps/mcp-server
-npm install
-npm run build
+# Install all workspace deps (picks up the new apps/mcp-server package automatically)
+pnpm install
+
+# Build only the MCP server
+pnpm --filter cwc-mcp-server build
+
+# Verify the output exists
+ls apps/mcp-server/dist/index.js
 ```
+
+> **Why pnpm, not npm?** The repo uses pnpm workspaces (`pnpm-workspace.yaml` covers `apps/*`). Running `npm install` inside `apps/mcp-server` creates a `package-lock.json`, installs duplicate dependencies, and breaks workspace symlinks. Always use `pnpm` from the repo root.
 
 ## Claude Desktop config example
 
 Replace `/absolute/path/to/CodeWebChat` with your local repository path.
 
-### macOS/Linux config body
+### macOS/Linux — `~/Library/Application Support/Claude/claude_desktop_config.json`
 
 ```json
 {
@@ -39,7 +46,7 @@ Replace `/absolute/path/to/CodeWebChat` with your local repository path.
 }
 ```
 
-### Windows config body
+### Windows — `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
 {
@@ -70,8 +77,6 @@ Replace `/absolute/path/to/CodeWebChat` with your local repository path.
 ```
 
 ## Inspector test command
-
-From the repository root:
 
 ```bash
 npx @modelcontextprotocol/inspector node apps/mcp-server/dist/index.js
@@ -130,7 +135,7 @@ export function summarizeBridgeStatus(status: BridgeStatus): string {
 
 ### No CodeWebChat WebSocket server
 
-Expected error:
+Expected error (fast — within `connect_timeout_ms`, default 3 s):
 
 ```text
 Timed out connecting to CodeWebChat at ws://localhost:55155. Start the CodeWebChat WebSocket server first.
@@ -138,11 +143,21 @@ Timed out connecting to CodeWebChat at ws://localhost:55155. Start the CodeWebCh
 
 ### No browser extension connected
 
-Expected error:
+Expected error (immediate):
 
 ```text
 No CodeWebChat browser extension is connected. Open the browser extension before using this MCP tool.
 ```
+
+### VS Code extension restarts while waiting for Apply Response
+
+Expected error (fast — immediate on WebSocket close, not after timeout_ms):
+
+```text
+CodeWebChat WebSocket closed while waiting for Apply Response. The VS Code extension may have restarted. Retry the tool call.
+```
+
+> **Note:** This error is new in the fixed bridge (Step 2). The original version would have hung silently for `timeout_ms` (default 5 minutes) before failing. The `CWC_DISCONNECTED` error fires as soon as the `ws.on('close')` event fires.
 
 ### User never clicks Apply Response
 
@@ -165,9 +180,12 @@ Apply Response completed, but the clipboard did not change. Refusing to return s
 ```text
 [ ] CodeWebChat VS Code extension or WebSocket server is running.
 [ ] CodeWebChat browser extension is connected.
-[ ] MCP server builds successfully.
+[ ] pnpm install ran from the repo root (not npm install inside apps/mcp-server).
+[ ] MCP server builds successfully: pnpm --filter cwc-mcp-server build
+[ ] apps/mcp-server/dist/index.js exists.
 [ ] MCP client can call cwc_status.
 [ ] send_to_codewebchat opens the selected chatbot.
 [ ] User clicks Apply Response after generation finishes.
 [ ] MCP client receives raw response text.
+[ ] Stopping VS Code mid-request returns CWC_DISCONNECTED immediately.
 ```
