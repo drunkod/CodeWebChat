@@ -17,16 +17,16 @@ MCP tool call
   -> send initialize-chat with request_id
   -> browser stores request_id with chat initialization data
   -> user clicks Apply Response
-  -> browser extracts response text
+  -> browser extracts response text from DOM (per-chatbot)
   -> browser sends apply-chat-response with request_id and response_text
   -> MCP bridge resolves the matching request without reading clipboard
 ```
 
-## Complete shared type change
+---
 
-Update the shared WebSocket message types.
+## File 1: `packages/shared/src/types/websocket-message.ts`
 
-### File: `packages/shared/src/types/websocket-message.ts`
+Add optional `request_id` and `response_text` to both message types. Both fields are optional for full backward compatibility with existing VS Code clients that do not send or consume them.
 
 ```ts
 import type { WebPromptType } from './web-prompt-type'
@@ -39,8 +39,9 @@ export type InitializeChatMessage = {
 
   /**
    * V1: Correlates one prompt with one response.
-   * This is required because client_id identifies the editor/MCP connection,
-   * not the individual request.
+   * Required for concurrent MCP tool calls — client_id alone identifies
+   * the connection, not the individual request.
+   * Optional for backward compatibility with existing VS Code clients.
    */
   request_id?: string
 
@@ -71,6 +72,7 @@ export type ApplyChatResponseMessage = {
 
   /**
    * V1: Raw response text extracted by the browser extension.
+   * When present, the MCP bridge uses this instead of the OS clipboard.
    * Optional for backward compatibility with the existing clipboard flow.
    */
   response_text?: string
@@ -81,137 +83,298 @@ export type ApplyChatResponseMessage = {
 }
 ```
 
-## Complete browser-side helper
+---
 
-Add a helper that extracts the response text and keeps the clipboard behavior for backward compatibility.
+## File 2: `apps/browser/src/types/messages.ts`
 
-### File: `apps/browser/src/content-scripts/send-prompt-content-script/utils/send-apply-response.ts`
+The browser extension's internal `Message` union type must be updated to include `request_id` and `response_text`. Without this change, TypeScript will error when the content script tries to send the new fields via `browser.runtime.sendMessage<Message>(...)`.
 
 ```ts
-import browser from 'webextension-polyfill'
-import type { Message } from '../../../types/messages'
+type ChatInitializedMessage = {
+  action: 'chat-initialized'
+}
 
-type SendApplyResponseParams = {
+type ApplyChatResponseMessage = {
+  action: 'apply-chat-response'
   client_id: number
+  /**
+   * V1: echoes the request_id from InitializeChatMessage.
+   * Undefined for responses triggered by existing VS Code clients.
+   */
   request_id?: string
+  /**
+   * V1: response text extracted from the chatbot DOM.
+   * Undefined when triggered by existing VS Code clients (clipboard path).
+   */
+  response_text?: string
   raw_instructions?: string
   edit_format?: string
-  footer: HTMLElement
-  perform_copy: (footer: HTMLElement) => Promise<void>
-  extract_response_text: () => string | Promise<string>
+  url?: string
 }
 
-const sleep = async (ms: number): Promise<void> => {
-  await new Promise((resolve) => setTimeout(resolve, ms))
+type FinishedRespondingMessage = {
+  action: 'finished-responding'
 }
 
-export const send_apply_response = async (params: SendApplyResponseParams): Promise<void> => {
-  const response_text = await params.extract_response_text()
-
-  // Preserve existing CodeWebChat behavior so VS Code users are not broken.
-  await params.perform_copy(params.footer)
-
-  // Existing implementation waits before sending the signal so clipboard writes settle.
-  await sleep(500)
-
-  await browser.runtime.sendMessage<Message>({
-    action: 'apply-chat-response',
-    client_id: params.client_id,
-    request_id: params.request_id,
-    response_text,
-    raw_instructions: params.raw_instructions,
-    edit_format: params.edit_format,
-    url: window.location.href
-  })
-}
+export type Message =
+  | ChatInitializedMessage
+  | ApplyChatResponseMessage
+  | FinishedRespondingMessage
 ```
 
-## Complete content-script integration example
+---
 
-Update the Apply Response button handler to call the new helper.
+## File 3: `apps/browser/src/content-scripts/send-prompt-content-script/utils/add-apply-response-button.ts`
 
-### File: `apps/browser/src/content-scripts/send-prompt-content-script/utils/add-apply-response-button.ts`
+Add `request_id` and `extract_response_text` parameters to the existing `add_apply_response_button` function. Both are optional so all 20+ existing chatbot integrations continue to compile and work unchanged — they simply don't pass the new params and fall back to the clipboard path.
 
 ```ts
-import { send_apply_response } from './send-apply-response'
+import { Message } from '@/types/messages'
+import { Logger } from '@shared/utils/logger'
+import browser from 'webextension-polyfill'
+import { apply_response_icon } from '../constants/apply-response-icon'
+import { apply_response_button_title } from '../constants/dictionary'
+import {
+  apply_chat_response_button_style,
+  set_button_disabled_state
+} from './apply-response-styles'
+import { show_response_ready_notification } from './show-response-ready-notification'
 
-type AddApplyResponseButtonParams = {
-  footer: HTMLElement
+export function add_apply_response_button(params: {
   client_id: number
+  /**
+   * V1: optional. When provided, echoed in apply-chat-response so the
+   * MCP bridge can correlate responses without relying on client_id alone.
+   */
   request_id?: string
   raw_instructions?: string
   edit_format?: string
-  perform_copy: (footer: HTMLElement) => Promise<void>
-  extract_response_text: () => string | Promise<string>
-}
+  footer: Element
+  get_chat_turn: (footer: Element) => HTMLElement | null
+  get_code_from_block?: (code_block: Element) => string | null | undefined
+  perform_copy: (footer: Element) => void | Promise<void>
+  /**
+   * V1: optional. When provided, called to extract the chatbot response text
+   * from the DOM. The returned text is sent as response_text in the
+   * apply-chat-response message so the MCP bridge can skip the clipboard.
+   * When absent, the MCP bridge falls back to the OS clipboard (V0 path).
+   */
+  extract_response_text?: (footer: Element) => string | Promise<string>
+  insert_button: (footer: Element, button: HTMLButtonElement) => void
+  customize_button?: (button: HTMLButtonElement) => void
+}) {
+  const existing_apply_response_button = params.footer.querySelector(
+    '.cwc-apply-response-button'
+  )
 
-const set_button_disabled_state = (button: HTMLButtonElement): void => {
-  button.disabled = true
-  button.textContent = 'Applying...'
-}
+  if (existing_apply_response_button) return
 
-export const add_apply_response_button = (params: AddApplyResponseButtonParams): HTMLButtonElement => {
+  const chat_turn = params.get_chat_turn(params.footer)
+  if (!chat_turn) {
+    Logger.error({
+      function_name: 'add_apply_response_button',
+      message: 'Chat turn container not found',
+      data: params.footer
+    })
+    return
+  }
+
   const apply_response_button = document.createElement('button')
-  apply_response_button.type = 'button'
-  apply_response_button.textContent = 'Apply Response'
-  apply_response_button.dataset.cwcApplyResponse = 'true'
+  apply_response_button.innerHTML = apply_response_icon
+  apply_response_button.classList.add('cwc-apply-response-button')
+  apply_response_button.title = apply_response_button_title
+  apply_chat_response_button_style(apply_response_button)
+  if (params.customize_button) params.customize_button(apply_response_button)
 
   apply_response_button.addEventListener('click', async () => {
     set_button_disabled_state(apply_response_button)
+    requestAnimationFrame(async () => {
+      // V1: extract text before perform_copy so the DOM is still intact
+      const response_text = params.extract_response_text
+        ? await params.extract_response_text(params.footer)
+        : undefined
 
-    requestAnimationFrame(() => {
-      void send_apply_response({
-        footer: params.footer,
+      // Always run perform_copy to preserve the existing clipboard behavior
+      // for VS Code users who rely on it
+      await params.perform_copy(params.footer)
+      await new Promise((resolve) => setTimeout(resolve, 500))
+
+      browser.runtime.sendMessage<Message>({
+        action: 'apply-chat-response',
         client_id: params.client_id,
         request_id: params.request_id,
+        response_text,
         raw_instructions: params.raw_instructions,
         edit_format: params.edit_format,
-        perform_copy: params.perform_copy,
-        extract_response_text: params.extract_response_text
-      }).finally(() => {
-        apply_response_button.disabled = false
-        apply_response_button.textContent = 'Apply Response'
+        url: window.location.href
       })
     })
   })
 
-  params.footer.appendChild(apply_response_button)
-  return apply_response_button
+  params.insert_button(params.footer, apply_response_button)
 }
 ```
 
-## Complete generic response extractor example
+---
 
-This extractor should be adapted per chatbot if necessary, but it gives the extension a generic fallback.
+## File 4: per-chatbot `extract_response_text` implementations
 
-### File: `apps/browser/src/content-scripts/send-prompt-content-script/utils/extract-response-text.ts`
+> **Scope note:** Each chatbot has a different DOM. A generic selector heuristic is unreliable — `[class*="message"]` breaks on nearly every production chatbot DOM. Each chatbot integration under `apps/browser/src/content-scripts/send-prompt-content-script/chatbots/` needs its own implementation. Below are concrete examples for the three primary chatbots. Remaining chatbots should be done in follow-up PRs, verified manually against live chatbot sessions.
+
+### Claude (`chatbots/claude.ts`)
+
+Claude wraps each response in a `.group` div. `get_chat_turn` already locates it via `f.closest('.group')`. Use the same anchor.
 
 ```ts
-const cloneWithoutCwcButtons = (element: HTMLElement): HTMLElement => {
-  const clone = element.cloneNode(true) as HTMLElement
-  clone.querySelectorAll('[data-cwc-apply-response="true"]').forEach((node) => node.remove())
-  return clone
-}
-
-export const extract_response_text_from_footer = (footer: HTMLElement): string => {
-  const candidate = footer.closest('article, [data-testid*="conversation"], [class*="message"], [class*="response"]')
-
-  if (candidate instanceof HTMLElement) {
-    const clone = cloneWithoutCwcButtons(candidate)
-    const text = clone.innerText.trim()
-    if (text) return text
-  }
-
-  const fallback = cloneWithoutCwcButtons(footer).innerText.trim()
-  return fallback
-}
+// Inside claude.ts — update the add_apply_response_button call:
+add_apply_response_button({
+  client_id: params.client_id,
+  request_id: params.request_id,   // V1: pass through from initialize-chat
+  raw_instructions: params.raw_instructions,
+  edit_format: params.edit_format,
+  footer,
+  get_chat_turn: (f) => f.closest('.group'),
+  perform_copy: (f) => {
+    const copy_button = f.querySelector(
+      'button[data-testid="action-bar-copy"]'
+    ) as HTMLElement
+    if (!copy_button) {
+      report_initialization_error({
+        function_name: 'claude.perform_copy',
+        log_message: 'Copy button not found'
+      })
+      return
+    }
+    copy_button.click()
+  },
+  // V1: extract the response text from the DOM before perform_copy fires
+  extract_response_text: (f) => {
+    const chat_turn = f.closest('.group') as HTMLElement | null
+    if (!chat_turn) return ''
+    // Claude renders responses in div.font-claude-message > div[data-is-streaming="false"]
+    const response_container = chat_turn.querySelector(
+      'div[data-is-streaming="false"]'
+    ) as HTMLElement | null
+    if (response_container) return response_container.innerText.trim()
+    // Fallback: innerText of the whole chat turn minus our button
+    const clone = chat_turn.cloneNode(true) as HTMLElement
+    clone.querySelectorAll('.cwc-apply-response-button').forEach((n) => n.remove())
+    return clone.innerText.trim()
+  },
+  insert_button: (f, b) =>
+    f.insertBefore(b, f.children[f.children.length])
+})
 ```
 
-## Complete MCP bridge V1 request handling example
+### ChatGPT (`chatbots/chatgpt.ts`)
 
-This replaces the single pending response slot with a request map. It also prefers `response_text` and only falls back to the clipboard for backward compatibility.
+ChatGPT renders assistant messages in `article[data-testid^="conversation-turn"]`. Each footer is inside the article.
 
-### File: `apps/mcp-server/src/cwc-bridge-v1.ts`
+```ts
+// Inside chatgpt.ts — update the add_apply_response_button call:
+add_apply_response_button({
+  client_id: params.client_id,
+  request_id: params.request_id,
+  raw_instructions: params.raw_instructions,
+  edit_format: params.edit_format,
+  footer,
+  get_chat_turn: (f) =>
+    f.closest('article[data-testid^="conversation-turn"]'),
+  perform_copy: async (f) => {
+    // existing copy logic unchanged
+    const copy_button = f.querySelector(
+      'button[data-testid="copy-turn-action-button"]'
+    ) as HTMLElement
+    copy_button?.click()
+  },
+  // V1
+  extract_response_text: (f) => {
+    const article = f.closest(
+      'article[data-testid^="conversation-turn"]'
+    ) as HTMLElement | null
+    if (!article) return ''
+    // ChatGPT response prose lives in .markdown.prose
+    const prose = article.querySelector('.markdown.prose') as HTMLElement | null
+    if (prose) return prose.innerText.trim()
+    const clone = article.cloneNode(true) as HTMLElement
+    clone.querySelectorAll('.cwc-apply-response-button').forEach((n) => n.remove())
+    return clone.innerText.trim()
+  },
+  insert_button: (f, b) => f.appendChild(b)
+})
+```
+
+### Gemini (`chatbots/gemini.ts`)
+
+Gemini uses a custom element `<model-response>` as the response container.
+
+```ts
+// Inside gemini.ts — update the add_apply_response_button call:
+add_apply_response_button({
+  client_id: params.client_id,
+  request_id: params.request_id,
+  raw_instructions: params.raw_instructions,
+  edit_format: params.edit_format,
+  footer,
+  get_chat_turn: (f) => f.closest('model-response'),
+  perform_copy: async (f) => {
+    // existing copy logic unchanged
+    const copy_button = f.querySelector(
+      'button[aria-label="Copy"]'
+    ) as HTMLElement
+    copy_button?.click()
+  },
+  // V1
+  extract_response_text: (f) => {
+    const model_response = f.closest('model-response') as HTMLElement | null
+    if (!model_response) return ''
+    // Gemini renders markdown inside message-content
+    const content = model_response.querySelector(
+      'message-content'
+    ) as HTMLElement | null
+    if (content) return content.innerText.trim()
+    const clone = model_response.cloneNode(true) as HTMLElement
+    clone.querySelectorAll('.cwc-apply-response-button').forEach((n) => n.remove())
+    return clone.innerText.trim()
+  },
+  insert_button: (f, b) => f.appendChild(b)
+})
+```
+
+---
+
+## File 5: how `request_id` flows from `initialize-chat` to the chatbot
+
+The content script must store `request_id` from the incoming `initialize-chat` message and pass it to `add_apply_response_button`. The storage pattern already exists for `client_id` — add `request_id` alongside it.
+
+In `send-prompt-content-script.ts` (simplified diff):
+
+```ts
+// When receiving initialize-chat message, store request_id alongside client_id:
+const stored_data = {
+  client_id: message.client_id,
+  request_id: message.request_id,  // V1: may be undefined for VS Code clients
+  raw_instructions: message.raw_instructions,
+  edit_format: message.edit_format,
+  // ... other fields
+}
+
+// When calling chatbot.observe_for_responses or add_apply_response_button,
+// pass stored_data.request_id through:
+chatbot.observe_for_responses({
+  client_id: stored_data.client_id,
+  request_id: stored_data.request_id,  // V1
+  // ...
+})
+```
+
+Update the `Chatbot` interface in `types/chatbot.ts` to include `request_id` in the params passed to `observe_for_responses` (or equivalent) so the type system enforces propagation.
+
+---
+
+## File 6: `apps/mcp-server/src/cwc-bridge-v1.ts`
+
+Replaces the single pending-response slot with a request map. Prefers `response_text` and falls back to clipboard for backward compatibility.
 
 ```ts
 import crypto from 'node:crypto'
@@ -311,7 +474,10 @@ export class CwcBridgeV1 {
       const ws = new WebSocket(url.toString())
       this.ws = ws
 
-      const timer = setTimeout(() => reject(new CwcMcpError('Timed out connecting to CodeWebChat.', 'CWC_NOT_CONNECTED')), this.options.connect_timeout_ms ?? 3000)
+      const timer = setTimeout(
+        () => reject(new CwcMcpError('Timed out connecting to CodeWebChat.', 'CWC_NOT_CONNECTED')),
+        this.options.connect_timeout_ms ?? 3000
+      )
 
       ws.on('open', () => {
         clearTimeout(timer)
@@ -319,13 +485,20 @@ export class CwcBridgeV1 {
       })
 
       ws.on('error', reject)
+
       ws.on('close', () => {
         this.ws = null
         this.client_id = null
         this.browser_connected = false
+        // Reject all pending requests immediately on disconnect
         for (const [request_id, pending] of this.pending_requests) {
           clearTimeout(pending.timer)
-          pending.reject(new CwcMcpError(`Connection closed before request ${request_id} completed.`, 'CWC_NOT_CONNECTED'))
+          pending.reject(
+            new CwcMcpError(
+              `Connection closed before request ${request_id} completed.`,
+              'CWC_DISCONNECTED'
+            )
+          )
         }
         this.pending_requests.clear()
       })
@@ -365,7 +538,15 @@ export class CwcBridgeV1 {
   private async handleApplyResponse(message: ApplyChatResponseMessage): Promise<void> {
     if (!message.request_id) {
       // Backward-compatible fallback: only safe if exactly one request is pending.
-      if (this.pending_requests.size !== 1) return
+      // If multiple requests are in flight (should not happen in V1 but could in mixed
+      // client environments), log and skip to avoid resolving the wrong request.
+      if (this.pending_requests.size !== 1) {
+        console.error(
+          '[cwc-mcp-v1] apply-chat-response received without request_id ' +
+          `and ${this.pending_requests.size} requests pending — skipping to avoid ambiguity`
+        )
+        return
+      }
       const only_request_id = [...this.pending_requests.keys()][0]
       await this.resolveRequestFromClipboard(only_request_id)
       return
@@ -378,19 +559,26 @@ export class CwcBridgeV1 {
     clearTimeout(pending.timer)
     this.pending_requests.delete(message.request_id)
 
+    // Prefer response_text — skip clipboard entirely
     if (message.response_text?.trim()) {
       pending.resolve(message.response_text)
       return
     }
 
+    // Fallback: clipboard (V0 path, for browser extensions not yet updated)
     await this.resolveRequestFromClipboard(message.request_id, pending)
   }
 
-  private async resolveRequestFromClipboard(request_id: string, existing?: PendingRequest): Promise<void> {
+  private async resolveRequestFromClipboard(
+    request_id: string,
+    existing?: PendingRequest
+  ): Promise<void> {
     const pending = existing ?? this.pending_requests.get(request_id)
     if (!pending) return
 
-    await new Promise((resolve) => setTimeout(resolve, this.options.clipboard_read_delay_ms ?? 250))
+    await new Promise((resolve) =>
+      setTimeout(resolve, this.options.clipboard_read_delay_ms ?? 250)
+    )
     const clipboard_text = await this.options.read_clipboard()
 
     clearTimeout(pending.timer)
@@ -411,14 +599,34 @@ export class CwcBridgeV1 {
 }
 ```
 
+---
+
 ## V1 acceptance criteria
 
 ```text
-[ ] InitializeChatMessage supports optional request_id.
-[ ] ApplyChatResponseMessage supports optional request_id.
-[ ] ApplyChatResponseMessage supports optional response_text.
-[ ] Existing VS Code clipboard flow still works.
-[ ] MCP server prefers response_text over clipboard.
-[ ] Concurrent MCP requests are either supported with request_id or explicitly rejected.
-[ ] Tests cover V0 fallback and V1 response_text path.
+[ ] packages/shared/src/types/websocket-message.ts adds optional request_id to InitializeChatMessage.
+[ ] packages/shared/src/types/websocket-message.ts adds optional request_id + response_text to ApplyChatResponseMessage.
+[ ] apps/browser/src/types/messages.ts adds optional request_id + response_text to ApplyChatResponseMessage.
+[ ] add_apply_response_button accepts optional request_id and extract_response_text params.
+[ ] claude.ts passes request_id and extract_response_text to add_apply_response_button.
+[ ] chatgpt.ts passes request_id and extract_response_text to add_apply_response_button.
+[ ] gemini.ts passes request_id and extract_response_text to add_apply_response_button.
+[ ] Remaining chatbots tracked in a follow-up issue; they still work via clipboard fallback.
+[ ] Existing VS Code clipboard flow still works (no params changed are required).
+[ ] MCP server (cwc-bridge-v1.ts) prefers response_text over clipboard.
+[ ] Concurrent MCP requests resolve independently via request_id map.
+[ ] Disconnect rejects all pending requests immediately (CWC_DISCONNECTED).
+[ ] Tests cover V0 clipboard fallback, V1 response_text path, and disconnect rejection.
 ```
+
+---
+
+## Implementation order
+
+1. Update shared types (`websocket-message.ts`) — no behavior change, additive only.
+2. Update browser `messages.ts` — TypeScript types only.
+3. Update `add_apply_response_button` — additive params, backward compatible.
+4. Update `claude.ts` first as the reference implementation and verify manually.
+5. Update `chatgpt.ts` and `gemini.ts`.
+6. Switch MCP server from `CwcBridge` to `CwcBridgeV1` in `index.ts`.
+7. File follow-up issue for remaining 17 chatbot integrations.
