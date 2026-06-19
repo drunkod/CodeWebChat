@@ -15,6 +15,7 @@ The research notes show that the CodeWebChat WebSocket server is a standalone No
 5. The mock server sends `apply-chat-response`.
 6. The bridge reads the mocked clipboard and returns the response.
 7. The test verifies the prompt payload sent to the server.
+8. **The bridge immediately rejects in-flight promises when the WebSocket closes** (new in fixed bridge).
 
 ## Complete file: `apps/mcp-server/test/cwc-bridge.test.ts`
 
@@ -83,6 +84,12 @@ const createMockCwcServer = async () => {
   return {
     ws_url: `ws://127.0.0.1:${address.port}`,
     received_initialize_messages,
+    // Forcibly close all connected sockets — used to test CWC_DISCONNECTED
+    closeAllClients: () => {
+      for (const client of ws_server.clients) {
+        client.terminate()
+      }
+    },
     close: async () => {
       await new Promise<void>((resolve, reject) => {
         ws_server.close((ws_error) => {
@@ -175,6 +182,79 @@ test('CwcBridge rejects unchanged clipboard content', async () => {
     await mock.close()
   }
 })
+
+// NEW TEST: verifies the CWC_DISCONNECTED fix from Step 2
+test('CwcBridge rejects immediately when WebSocket closes during in-flight request', async () => {
+  const mock = await createMockCwcServer()
+
+  // This server never sends apply-chat-response — we'll close the socket instead
+  const neverResolvingServer = await (async () => {
+    const http_server = http.createServer()
+    const ws_server = new WebSocketServer({ server: http_server })
+
+    await new Promise<void>((resolve) => {
+      http_server.listen(0, '127.0.0.1', resolve)
+    })
+
+    const address = http_server.address()
+    assert.ok(address && typeof address === 'object')
+
+    ws_server.on('connection', (socket, request) => {
+      const url = new URL(request.url ?? '/', `http://${request.headers.host}`)
+      const token = url.searchParams.get('token')
+      if (token !== SECURITY_TOKENS.VSCODE) {
+        socket.close(1008, 'invalid token')
+        return
+      }
+      // Send handshake but never send apply-chat-response
+      socket.send(JSON.stringify({ action: 'client-id-assignment', client_id: 99 }))
+      socket.send(JSON.stringify({ action: 'browser-connection-status', has_connected_browsers: true }))
+    })
+
+    return {
+      ws_url: `ws://127.0.0.1:${address.port}`,
+      terminateAll: () => { for (const c of ws_server.clients) c.terminate() },
+      close: async () => {
+        await new Promise<void>((resolve) => ws_server.close(() => resolve()))
+        await new Promise<void>((resolve) => http_server.close(() => resolve()))
+      }
+    }
+  })()
+
+  const bridge = new CwcBridge({
+    ws_url: neverResolvingServer.ws_url,
+    read_clipboard: async () => 'clipboard text',
+    clipboard_read_delay_ms: 0
+  })
+
+  try {
+    await bridge.connect()
+
+    const start = Date.now()
+
+    // Start the prompt — it will wait for apply-chat-response that never comes
+    const prompt_promise = bridge.sendPromptAndWait({
+      url: 'https://claude.ai/new',
+      text: 'This will never get a response.',
+      timeout_ms: 60000 // 60s — we expect rejection BEFORE this fires
+    })
+
+    // After a short delay, terminate the WebSocket connection
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    neverResolvingServer.terminateAll()
+
+    // The promise should reject with CWC_DISCONNECTED almost immediately,
+    // not after the 60s timeout_ms
+    await assert.rejects(prompt_promise, /WebSocket closed while waiting/i)
+
+    const elapsed = Date.now() - start
+    // Should fail in well under 2 seconds, not 60 seconds
+    assert.ok(elapsed < 2000, `Expected fast rejection but took ${elapsed}ms`)
+  } finally {
+    await neverResolvingServer.close()
+    await mock.close()
+  }
+})
 ```
 
 ## Complete optional file: `apps/mcp-server/test/no-browser.test.ts`
@@ -253,8 +333,12 @@ test('CwcBridge rejects send when no browser extension is connected', async () =
 ## Run tests
 
 ```bash
+# From repo root
+pnpm --filter cwc-mcp-server test
+
+# Or from inside apps/mcp-server (using pnpm run, not npm run)
 cd apps/mcp-server
-npm test
+pnpm test
 ```
 
 ## Expected result
@@ -262,9 +346,12 @@ npm test
 ```text
 ✔ CwcBridge sends initialize-chat and returns clipboard text after apply-chat-response
 ✔ CwcBridge rejects unchanged clipboard content
+✔ CwcBridge rejects immediately when WebSocket closes during in-flight request
 ✔ CwcBridge rejects send when no browser extension is connected
 ```
 
 ## Why this is enough for V0
 
 These tests validate the MCP server's contract with the existing CodeWebChat protocol without relying on a real chatbot, real browser automation, or real clipboard state. The browser/content-script path should be covered by a separate manual integration checklist because chatbot DOMs and browser-extension state are inherently environment-dependent.
+
+The new disconnect test (`CwcBridge rejects immediately when WebSocket closes`) proves the Step 2 fix: the bridge must fail fast on disconnect, not hang for `timeout_ms`.
