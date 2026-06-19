@@ -12,6 +12,18 @@ This plan is based on the research findings that:
 - `ApplyChatResponseMessage` does not contain response text today; the current prototype must read the OS clipboard after the user clicks **Apply Response**.
 - `without_submission` is not currently part of `InitializeChatMessage`, so this MCP prototype must not rely on it.
 
+## pnpm workspace
+
+The repo root `pnpm-workspace.yaml` already includes `apps/*`:
+
+```yaml
+packages:
+  - 'packages/*'
+  - 'apps/*'
+```
+
+`apps/mcp-server` is therefore automatically part of the workspace — no change needed. Install and build from the **repo root** using pnpm (see Step 4). Do **not** run `npm install` inside the package directory; that creates a conflicting `package-lock.json` and bypasses workspace hoisting.
+
 ## New folder
 
 Create a new package at:
@@ -36,7 +48,7 @@ apps/mcp-server/
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
-    "test": "npm run build && node --test dist/**/*.test.js"
+    "test": "pnpm run build && node --test $(find dist -name '*.test.js' | sort)"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.0",
@@ -55,6 +67,8 @@ apps/mcp-server/
   }
 }
 ```
+
+> **Note on test script:** Uses `find dist -name '*.test.js' | sort` instead of a shell glob (`dist/**/*.test.js`). Glob expansion of `**` is inconsistent across bash, zsh, and CI environments. `find` is portable on macOS, Linux, and Windows (Git Bash / WSL).
 
 ## Complete file: `apps/mcp-server/tsconfig.json`
 
@@ -151,6 +165,7 @@ export class CwcMcpError extends Error {
       | 'CWC_CLIPBOARD_EMPTY'
       | 'CWC_CLIPBOARD_UNCHANGED'
       | 'CWC_BAD_MESSAGE'
+      | 'CWC_DISCONNECTED'
   ) {
     super(message)
     this.name = 'CwcMcpError'
@@ -162,6 +177,8 @@ export const toErrorText = (error: unknown): string => {
   return String(error)
 }
 ```
+
+> **Note:** `CWC_DISCONNECTED` is added to the error code union. Step 2 uses it when the WebSocket closes while a prompt is in-flight, so the MCP client receives an immediate error instead of hanging until `timeout_ms`.
 
 ## Complete file: `apps/mcp-server/src/clipboard.ts`
 
@@ -184,12 +201,15 @@ export const readSystemClipboard: ReadClipboard = async () => {
 
 ## Install and build
 
-From the repository root:
+From the **repository root** (not inside `apps/mcp-server`):
 
 ```bash
-cd apps/mcp-server
-npm install
-npm run build
-```
+# Install all workspace dependencies including the new package
+pnpm install
 
-If this repository keeps strict pnpm workspace rules, add `apps/mcp-server` to the workspace pattern if it is not already covered.
+# Build only the MCP server package
+pnpm --filter cwc-mcp-server build
+
+# Or build all workspace packages at once
+pnpm -r build
+```
