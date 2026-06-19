@@ -1,79 +1,197 @@
-# Step 7 — Capture Architect Decisions as Code Defaults
+# Step 7 — Capture Architect Decisions as Code and Documentation
 
 ## Goal
 
-Turn the research answers into explicit defaults so the implementation does not accidentally drift into unsafe or unsupported behavior.
+Turn the research answers into explicit, durable artifacts so the implementation does not accidentally drift into unsafe or unsupported behavior.
 
-This step creates a small decision module, a runtime guard module, and a safety-focused test. These examples encode the current known facts:
+This step produces two things:
 
-- V0 is semi-automated.
-- V0 returns raw response text only.
-- V0 does not apply file edits.
-- V0 serializes tool calls.
-- V0 does not use `without_submission` because it is not part of the current protocol.
-- V0 reads the clipboard only after `apply-chat-response`.
-- V1 should add `request_id` and `response_text`.
+1. **`DECISIONS.md`** — a human-readable Architecture Decision Record (ADR) committed alongside the code. Decisions belong in prose, not in a TypeScript module that ships to users.
+2. **`guards.ts`** — a small runtime module that enforces the decisions as errors at call time. Runtime guards are genuinely useful; a `decisions.ts` object that is only read by tests is not.
 
-## Complete file: `apps/mcp-server/src/decisions.ts`
+The original plan had a `decisions.ts` module that duplicated information already in `DECISIONS.md`. Shipping an `ARCHITECT_DECISIONS` object as production code adds surface area with no runtime benefit. The tests for it (`architect decisions encode V0 safety defaults`) only verify that constants equal themselves — they add no coverage of actual behavior. Those tests are replaced here by tests that verify the guards actually reject bad input.
 
-```ts
-export type AutomationMode = 'semi_automated' | 'fully_automated'
-export type ResponseMode = 'raw_text' | 'parsed_file_edits'
-export type EditApplicationMode = 'return_only' | 'apply_to_workspace'
-export type ConcurrencyMode = 'serialized' | 'request_id_parallel'
+---
 
-export type ArchitectDecisions = {
-  automation_mode: AutomationMode
-  response_mode: ResponseMode
-  edit_application_mode: EditApplicationMode
-  concurrency_mode: ConcurrencyMode
-  uses_clipboard_fallback: boolean
-  requires_apply_response_click: boolean
-  supports_without_submission: boolean
-  requires_request_id_for_parallelism: boolean
-  preferred_v1_protocol_fields: Array<'request_id' | 'response_text'>
-}
+## File 1: `apps/mcp-server/DECISIONS.md`
 
-export const ARCHITECT_DECISIONS: ArchitectDecisions = {
-  automation_mode: 'semi_automated',
-  response_mode: 'raw_text',
-  edit_application_mode: 'return_only',
-  concurrency_mode: 'serialized',
-  uses_clipboard_fallback: true,
-  requires_apply_response_click: true,
-  supports_without_submission: false,
-  requires_request_id_for_parallelism: true,
-  preferred_v1_protocol_fields: ['request_id', 'response_text']
-}
+```markdown
+# Architecture Decision Record — cwc-mcp-server
 
-export const explainDecision = (key: keyof ArchitectDecisions): string => {
-  switch (key) {
-    case 'automation_mode':
-      return 'V0 is semi-automated because the current browser extension signals apply-chat-response only after the user clicks Apply Response.'
-    case 'response_mode':
-      return 'V0 returns raw response text because CodeWebChat response parsing and workspace editing are VS Code-specific.'
-    case 'edit_application_mode':
-      return 'V0 does not apply edits. The parent MCP client or IDE agent should decide how to edit files.'
-    case 'concurrency_mode':
-      return 'V0 serializes calls because the current protocol correlates responses by client_id, not request_id.'
-    case 'uses_clipboard_fallback':
-      return 'V0 reads the clipboard because ApplyChatResponseMessage does not currently include response text.'
-    case 'requires_apply_response_click':
-      return 'The user must click Apply Response so the content script copies the chatbot response and sends the WebSocket signal.'
-    case 'supports_without_submission':
-      return 'The current InitializeChatMessage type does not include without_submission, so the MCP server must not expose it.'
-    case 'requires_request_id_for_parallelism':
-      return 'Parallel requests require request_id because multiple requests from the same MCP connection share one client_id.'
-    case 'preferred_v1_protocol_fields':
-      return 'V1 should add request_id for correlation and response_text to remove clipboard dependence.'
-  }
-}
+## ADR-001: V0 is semi-automated
+
+**Status:** Accepted  
+**Date:** 2026-06
+
+### Context
+
+The browser extension's `ApplyChatResponseMessage` carries no response text — it is purely a
+signal. The actual AI response is in the OS clipboard, copied by the browser extension only
+after the user clicks **Apply Response** in the chatbot tab.
+
+### Decision
+
+V0 is semi-automated. The user must click Apply Response. The MCP server waits, then reads
+the OS clipboard.
+
+### Consequences
+
+- MCP clients must inform users that a manual click is required.
+- `send_to_codewebchat` tool description says so explicitly.
+- `timeout_ms` defaults to 300,000 ms (5 minutes) to give the user time to review and click.
+
+---
+
+## ADR-002: V0 returns raw response text only
+
+**Status:** Accepted  
+**Date:** 2026-06
+
+### Context
+
+CodeWebChat's VS Code extension parses chatbot responses and applies file edits using
+workspace-specific context (open editors, diff tools, VS Code API). That logic is not
+portable to a standalone Node process.
+
+### Decision
+
+The MCP server returns raw clipboard text only. It does not parse edit formats, apply
+file changes, or interact with any IDE. The parent MCP client or IDE agent decides how
+to use the text.
+
+### Consequences
+
+- No `apply_edits` or `parse_response` fields are exposed in V0 tools.
+- `guards.ts` rejects these fields if passed.
+
+---
+
+## ADR-003: V0 serializes tool calls
+
+**Status:** Accepted  
+**Date:** 2026-06
+
+### Context
+
+`client_id` identifies the editor connection, not an individual request. Multiple
+simultaneous `send_to_codewebchat` calls from the same MCP process share one `client_id`.
+If two calls are in flight, an `apply-chat-response` could resolve the wrong promise.
+
+### Decision
+
+V0 uses a promise chain to serialize all tool calls within a single MCP server process.
+Only one `initialize-chat` is in flight at a time.
+
+### Consequences
+
+- Simple and safe for single-agent use.
+- Not suitable for concurrent multi-agent use without V1 (`request_id`).
+
+---
+
+## ADR-004: V0 uses the OS clipboard as response transport
+
+**Status:** Accepted — superseded by ADR-007 in V1  
+**Date:** 2026-06
+
+### Context
+
+`ApplyChatResponseMessage` contains no `response_text` field. Adding it requires changes
+to the shared protocol, the browser extension, and all 20+ chatbot integrations.
+
+### Decision
+
+V0 reads the OS clipboard after `apply-chat-response` arrives. The bridge verifies that
+the clipboard changed to avoid returning stale content.
+
+### Consequences
+
+- Works on macOS and Windows out of the box.
+- Linux requires `xclip`, `xsel`, or `wl-clipboard`.
+- A 250 ms delay after `apply-chat-response` is sufficient because the browser extension
+  already waits 500 ms before sending the signal.
+
+---
+
+## ADR-005: V0 does not support `without_submission`
+
+**Status:** Accepted  
+**Date:** 2026-06
+
+### Context
+
+`InitializeChatMessage` in the current codebase does not include a `without_submission`
+field. Adding it to the MCP tool and sending it would have no effect and would mislead
+callers.
+
+### Decision
+
+`without_submission` is not exposed. `guards.ts` rejects it if passed.
+
+---
+
+## ADR-006: Disconnect rejects in-flight promises immediately
+
+**Status:** Accepted  
+**Date:** 2026-06
+
+### Context
+
+The original V0 bridge set `pending_apply_response = null` in the WebSocket `close`
+handler. The in-flight promise remained suspended until `timeout_ms` (default 5 minutes)
+fired — giving the MCP client no feedback that the connection was lost.
+
+### Decision
+
+The `close` handler calls `pending_apply_response.reject(CWC_DISCONNECTED)` immediately.
+`CwcBridgeV1` does the same for all entries in `pending_requests`.
+
+### Consequences
+
+- MCP clients see a fast, actionable error instead of a 5-minute hang.
+- Callers should retry after ensuring the VS Code extension is running.
+
+---
+
+## ADR-007: V1 adds `request_id` and `response_text` to remove clipboard dependence
+
+**Status:** Proposed  
+**Date:** 2026-06
+
+### Context
+
+V0 limitations: clipboard dependence, single in-flight request per connection.
+
+### Decision
+
+V1 adds optional `request_id` (UUID) to `InitializeChatMessage`. The browser extension
+echoes it in `ApplyChatResponseMessage` along with `response_text` extracted from the
+DOM. Both fields are optional so existing VS Code clients are unaffected.
+
+Each chatbot integration implements `extract_response_text` using chatbot-specific DOM
+selectors. A generic selector heuristic is not used because it is unreliable across
+production chatbot DOMs.
+
+### Consequences
+
+- Clipboard is no longer required for updated chatbot integrations.
+- Concurrent requests are safe when `request_id` is present.
+- 20+ chatbot integrations need per-chatbot `extract_response_text` implementations.
+  Done incrementally: Claude, ChatGPT, Gemini first; the rest in follow-up PRs.
+- Existing VS Code clipboard flow is fully backward compatible.
 ```
 
-## Complete file: `apps/mcp-server/src/guards.ts`
+---
+
+## File 2: `apps/mcp-server/src/guards.ts`
+
+Runtime enforcement only. No `ARCHITECT_DECISIONS` object — that information lives in `DECISIONS.md`.
 
 ```ts
-import { ARCHITECT_DECISIONS } from './decisions.js'
+/**
+ * Runtime guards that enforce V0 architectural decisions at call time.
+ * See DECISIONS.md for the rationale behind each guard.
+ */
 
 export type ToolInputWithPossibleUnsupportedFields = {
   without_submission?: unknown
@@ -82,44 +200,56 @@ export type ToolInputWithPossibleUnsupportedFields = {
   [key: string]: unknown
 }
 
-export const rejectUnsupportedV0Fields = (input: ToolInputWithPossibleUnsupportedFields): void => {
+/**
+ * Rejects tool input fields that are not supported in V0.
+ * Throws a descriptive Error so the MCP client sees exactly what is wrong.
+ */
+export const rejectUnsupportedV0Fields = (
+  input: ToolInputWithPossibleUnsupportedFields
+): void => {
   if ('without_submission' in input) {
     throw new Error(
-      'without_submission is not supported by the current CodeWebChat InitializeChatMessage protocol. Remove this field or implement the V1 protocol upgrade first.'
+      'without_submission is not supported by the current CodeWebChat InitializeChatMessage ' +
+        'protocol (ADR-005). Remove this field or implement the V1 protocol upgrade first.'
     )
   }
 
   if (input.apply_edits === true) {
     throw new Error(
-      'This MCP server returns raw chatbot text only. It must not apply workspace edits in V0.'
+      'apply_edits is not supported in V0 (ADR-002). ' +
+        'This MCP server returns raw chatbot text only. ' +
+        'Let the parent MCP client or IDE agent parse and apply edits.'
     )
   }
 
   if (input.parse_response === true) {
     throw new Error(
-      'This MCP server does not parse CodeWebChat responses in V0. Let the MCP client or IDE agent parse/apply edits.'
+      'parse_response is not supported in V0 (ADR-002). ' +
+        'This MCP server does not parse CodeWebChat response formats. ' +
+        'Let the parent MCP client or IDE agent handle parsing.'
     )
   }
 }
 
-export const getRuntimeSafetyBanner = (): string => {
-  return [
-    'CodeWebChat MCP V0 safety defaults:',
-    `- automation: ${ARCHITECT_DECISIONS.automation_mode}`,
-    `- response mode: ${ARCHITECT_DECISIONS.response_mode}`,
-    `- edit application: ${ARCHITECT_DECISIONS.edit_application_mode}`,
-    `- concurrency: ${ARCHITECT_DECISIONS.concurrency_mode}`,
-    `- clipboard fallback: ${ARCHITECT_DECISIONS.uses_clipboard_fallback}`,
-    `- requires Apply Response click: ${ARCHITECT_DECISIONS.requires_apply_response_click}`,
-    `- supports without_submission: ${ARCHITECT_DECISIONS.supports_without_submission}`,
-    `- V1 fields: ${ARCHITECT_DECISIONS.preferred_v1_protocol_fields.join(', ')}`
-  ].join('\n')
-}
+/**
+ * Returns a one-paragraph plain-text summary of V0 constraints for use
+ * as the MCP server's `instructions` field, so MCP clients understand
+ * what the server can and cannot do before calling any tool.
+ */
+export const getServerInstructions = (): string =>
+  [
+    'CodeWebChat MCP Server V0.',
+    'Semi-automated: the user must click Apply Response in the browser chatbot tab (ADR-001).',
+    'Returns raw response text only — no file editing or response parsing (ADR-002).',
+    'Serializes tool calls — do not call send_to_codewebchat concurrently (ADR-003).',
+    'Uses OS clipboard as response transport; Linux requires xclip, xsel, or wl-clipboard (ADR-004).',
+    'Does not support without_submission (ADR-005).'
+  ].join(' ')
 ```
 
-## Complete MCP integration change
+---
 
-Add the guard and safety banner to `apps/mcp-server/src/index.ts`.
+## File 3: updated `apps/mcp-server/src/index.ts`
 
 ```ts
 #!/usr/bin/env node
@@ -130,20 +260,15 @@ import { z } from 'zod'
 import { readSystemClipboard } from './clipboard.js'
 import { CwcBridge } from './cwc-bridge.js'
 import { toErrorText } from './errors.js'
-import { getRuntimeSafetyBanner, rejectUnsupportedV0Fields } from './guards.js'
+import { getServerInstructions, rejectUnsupportedV0Fields } from './guards.js'
 
 const bridge = new CwcBridge({
   read_clipboard: readSystemClipboard
 })
 
 const server = new McpServer(
-  {
-    name: 'cwc-mcp-server',
-    version: '0.1.0'
-  },
-  {
-    instructions: getRuntimeSafetyBanner()
-  }
+  { name: 'cwc-mcp-server', version: '0.1.0' },
+  { instructions: getServerInstructions() }
 )
 
 server.registerTool(
@@ -160,14 +285,7 @@ server.registerTool(
         content: [
           {
             type: 'text',
-            text: JSON.stringify(
-              {
-                ...bridge.status(),
-                safety: getRuntimeSafetyBanner()
-              },
-              null,
-              2
-            )
+            text: JSON.stringify(bridge.status(), null, 2)
           }
         ]
       }
@@ -184,12 +302,17 @@ server.registerTool(
   'send_to_codewebchat',
   {
     title: 'Send Prompt To CodeWebChat',
-    description: 'Send a prompt to a CodeWebChat-supported chatbot. Returns raw response text after the user clicks Apply Response.',
+    description: [
+      'Send a prompt to a CodeWebChat-supported browser chatbot.',
+      'The user must click Apply Response in the chatbot tab.',
+      'Returns the raw clipboard text copied by the browser extension.',
+      'Do not call this tool concurrently from the same MCP server process.'
+    ].join(' '),
     inputSchema: {
-      url: z.string().url(),
-      text: z.string().min(1),
-      model: z.string().optional(),
-      target_browser_id: z.number().int().positive().optional(),
+      url: z.string().url().describe('Target chatbot URL, e.g. https://claude.ai/new or https://chatgpt.com/.'),
+      text: z.string().min(1).describe('Prompt to send to the chatbot.'),
+      model: z.string().optional().describe('Optional chatbot model name.'),
+      target_browser_id: z.number().int().positive().optional().describe('Optional browser client ID when multiple browsers are connected.'),
       temperature: z.number().min(0).max(2).optional(),
       thinking_budget: z.number().int().positive().optional(),
       reasoning_effort: z.string().optional(),
@@ -201,7 +324,13 @@ server.registerTool(
       prompt_type: z.string().optional(),
       reuse_last_tab: z.boolean().optional(),
       invocation_count: z.number().int().positive().max(10).optional(),
-      timeout_ms: z.number().int().positive().max(900000).optional()
+      timeout_ms: z
+        .number()
+        .int()
+        .positive()
+        .max(900000)
+        .optional()
+        .describe('Max ms to wait for Apply Response click. Default 300000 (5 min).')
     }
   },
   async (input) => {
@@ -224,66 +353,75 @@ const transport = new StdioServerTransport()
 await server.connect(transport)
 ```
 
-## Complete test: `apps/mcp-server/test/guards.test.ts`
+---
+
+## File 4: `apps/mcp-server/test/guards.test.ts`
+
+Tests verify that guards actually reject bad input — not that constants equal themselves.
 
 ```ts
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { ARCHITECT_DECISIONS, explainDecision } from '../src/decisions.js'
-import { getRuntimeSafetyBanner, rejectUnsupportedV0Fields } from '../src/guards.js'
+import { rejectUnsupportedV0Fields, getServerInstructions } from '../src/guards.js'
 
-test('architect decisions encode V0 safety defaults', () => {
-  assert.equal(ARCHITECT_DECISIONS.automation_mode, 'semi_automated')
-  assert.equal(ARCHITECT_DECISIONS.response_mode, 'raw_text')
-  assert.equal(ARCHITECT_DECISIONS.edit_application_mode, 'return_only')
-  assert.equal(ARCHITECT_DECISIONS.concurrency_mode, 'serialized')
-  assert.equal(ARCHITECT_DECISIONS.uses_clipboard_fallback, true)
-  assert.equal(ARCHITECT_DECISIONS.requires_apply_response_click, true)
-  assert.equal(ARCHITECT_DECISIONS.supports_without_submission, false)
-  assert.equal(ARCHITECT_DECISIONS.requires_request_id_for_parallelism, true)
-  assert.deepEqual(ARCHITECT_DECISIONS.preferred_v1_protocol_fields, ['request_id', 'response_text'])
-})
-
-test('runtime safety banner is explicit', () => {
-  const banner = getRuntimeSafetyBanner()
-  assert.match(banner, /semi_automated/)
-  assert.match(banner, /raw_text/)
-  assert.match(banner, /serialized/)
-  assert.match(banner, /request_id, response_text/)
-})
-
-test('unsupported V0 fields are rejected', () => {
+test('rejectUnsupportedV0Fields rejects without_submission (ADR-005)', () => {
   assert.throws(
     () => rejectUnsupportedV0Fields({ without_submission: true }),
     /without_submission is not supported/i
   )
+  assert.throws(
+    () => rejectUnsupportedV0Fields({ without_submission: false }),
+    /without_submission is not supported/i,
+    'should reject even when the value is false — the field itself is unsupported'
+  )
+})
 
+test('rejectUnsupportedV0Fields rejects apply_edits (ADR-002)', () => {
   assert.throws(
     () => rejectUnsupportedV0Fields({ apply_edits: true }),
-    /must not apply workspace edits/i
+    /apply_edits is not supported/i
   )
+})
 
+test('rejectUnsupportedV0Fields rejects parse_response (ADR-002)', () => {
   assert.throws(
     () => rejectUnsupportedV0Fields({ parse_response: true }),
-    /does not parse CodeWebChat responses/i
+    /parse_response is not supported/i
   )
 })
 
-test('decision explanations are useful for future maintainers', () => {
-  assert.match(explainDecision('automation_mode'), /Apply Response/)
-  assert.match(explainDecision('requires_request_id_for_parallelism'), /client_id/)
-  assert.match(explainDecision('preferred_v1_protocol_fields'), /response_text/)
+test('rejectUnsupportedV0Fields allows valid V0 fields through', () => {
+  // Should not throw for normal tool input
+  assert.doesNotThrow(() =>
+    rejectUnsupportedV0Fields({
+      url: 'https://claude.ai/new',
+      text: 'Hello',
+      system_instructions: 'Be concise.',
+      reuse_last_tab: true,
+      timeout_ms: 60000
+    })
+  )
+})
+
+test('getServerInstructions mentions key V0 constraints', () => {
+  const instructions = getServerInstructions()
+  assert.match(instructions, /Apply Response/i, 'should mention the required user action')
+  assert.match(instructions, /raw response text/i, 'should clarify no file editing')
+  assert.match(instructions, /concurrently/i, 'should warn against concurrent calls')
+  assert.match(instructions, /clipboard/i, 'should mention clipboard transport')
+  assert.match(instructions, /without_submission/i, 'should mention unsupported field')
 })
 ```
+
+---
 
 ## Architect review checklist
 
 ```text
-[ ] Confirm V0 remains semi-automated.
-[ ] Confirm raw text is the only V0 return value.
-[ ] Confirm file edits are left to the parent MCP client or IDE.
-[ ] Confirm no without_submission support is exposed in V0.
-[ ] Confirm concurrency remains serialized until request_id is implemented.
-[ ] Confirm V1 adds request_id and response_text.
-[ ] Confirm clipboard fallback remains only for backward compatibility.
+[ ] DECISIONS.md committed to apps/mcp-server/ alongside source code.
+[ ] No ARCHITECT_DECISIONS object shipped in production JS bundle.
+[ ] guards.ts rejects without_submission, apply_edits, parse_response.
+[ ] getServerInstructions() used as MCP server instructions field.
+[ ] Guards tests verify behavior, not constant equality.
+[ ] V1 decisions referenced in ADR-007 with "Proposed" status.
 ```
