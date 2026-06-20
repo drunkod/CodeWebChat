@@ -1,0 +1,35 @@
+Please review the latest draft implementation in the connected GitHub repository.
+
+Repository: {{repo_name}}
+Base branch: {{base_branch}}
+Draft branch: {{draft_branch}}
+Head commit: {{commit_sha}}
+Commit title: {{commit_title}}
+
+Author summary:
+{{change_summary}}
+
+Files changed:
+{{changed_files}}
+
+Review focus:
+{{review_focus}}
+
+Instructions:
+- Review the diff introduced by {{commit_sha}} on {{draft_branch}} relative to {{base_branch}}.
+- Use the connected GitHub repository as the source of truth.
+- Ignore unrelated repository issues unless they directly affect this change.
+- Flag correctness issues first, then test gaps, then maintainability issues.
+- If the change is acceptable, say what is still worth tightening before merge.
+
+Return your answer in this structure:
+
+Verdict:
+Risk:
+Blocking issues:
+Non-blocking improvements:
+Suggested tests:
+Editor feedback packet:
+
+Then append a fenced ```json block with this schema:
+{ "verdict": "...", "risk": "...", "findings": [ { "severity": "...", "path": "...", "title": "...", "why_it_matters": "...", "recommended_fix": "..." } ], "tests": ["..."], "editor_patch_plan": ["..."] }

@@ -11,3 +11,6 @@ dist/
 
 # Local MCP Inspector config (machine-specific node path)
 apps/mcp-server/inspector-config.json
+
+# review-handoff local round state (transient)
+.review-handoff/
