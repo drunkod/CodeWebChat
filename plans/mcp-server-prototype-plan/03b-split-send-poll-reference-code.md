@@ -1,5 +1,157 @@
 # Step 3b — Split `send` + `poll` tools (complete code, ADR-009 Option C)
 
+> ## ⭐ Recommended path for the current code: the client-mode adaptation below
+> The full `RequestRegistry` further down assumes the Phase B `CwcTransport`
+> abstraction, which you don't have yet. Since you're doing the split **before**
+> Phase B, use the **Client-mode adaptation** in the next section — it reuses your
+> existing, tested `sendPromptAndWait` and is a much smaller, lower-risk change.
+> When you reach Phase B, swap to the transport-based `RequestRegistry`.
+
+---
+
+## Client-mode adaptation (apply this now, before Phase B)
+
+The trick: don't rewrite the bridge. `beginPrompt` **fires** `sendPromptAndWait`
+without awaiting it and stores the promise under a ticket; `pollPrompt` races
+that promise against a short timer. All the hard logic (serialization, clipboard
+guard, timeout, disconnect rejection) is reused unchanged.
+
+### 1. `src/errors.ts` — add two codes
+
+```ts
+| 'CWC_UNKNOWN_TICKET'   // poll called with a ticket we don't have
+| 'CWC_BUSY'             // optional: a request is already in flight (client_id-only correlation)
+```
+
+### 2. `src/cwc-bridge.ts` — add ticket tracking (keep `sendPromptAndWait` as-is)
+
+```ts
+import { randomUUID } from 'node:crypto'
+
+// ...inside class CwcBridge:
+
+private requests = new Map<string, {
+  promise: Promise<string>
+  settled: boolean
+  result?: string
+  error?: unknown
+}>()
+
+/** Fire a prompt and return a ticket immediately. Does NOT wait for Apply. */
+public beginPrompt(input: SendPromptInput): { ticket: string } {
+  const ticket = randomUUID()
+  // sendPromptAndWait already serializes internally, so concurrent begins queue safely.
+  const promise = this.sendPromptAndWait(input)
+  const rec: { promise: Promise<string>; settled: boolean; result?: string; error?: unknown } =
+    { promise, settled: false }
+  promise.then(
+    (r) => { rec.result = r; rec.settled = true },
+    (e) => { rec.error = e; rec.settled = true }
+  )
+  this.requests.set(ticket, rec)
+  return { ticket }
+}
+
+/** Return the reply if ready, else 'pending' after a short capped wait. */
+public async pollPrompt(
+  ticket: string,
+  wait_ms?: number
+): Promise<{ status: 'done'; response: string } | { status: 'pending'; ticket: string }> {
+  const rec = this.requests.get(ticket)
+  if (!rec) {
+    throw new CwcMcpError(
+      `Unknown or expired ticket: ${ticket}. Call send_to_codewebchat again.`,
+      'CWC_UNKNOWN_TICKET'
+    )
+  }
+  const cap = Math.min(wait_ms ?? 10000, 30000)
+  const pendingSentinel = Symbol('pending')
+  const timed = new Promise<typeof pendingSentinel>((res) =>
+    setTimeout(() => res(pendingSentinel), cap)
+  )
+  // Wait for either the request to settle or the short cap to elapse.
+  const outcome = await Promise.race([
+    rec.promise.then(() => 'settled' as const, () => 'settled' as const),
+    timed
+  ])
+  if (outcome === pendingSentinel && !rec.settled) {
+    return { status: 'pending', ticket }   // model should poll again
+  }
+  this.requests.delete(ticket)             // settled: hand back result / throw error
+  if (rec.error) throw rec.error
+  return { status: 'done', response: rec.result! }
+}
+```
+
+Notes:
+- Setup errors (`CWC_NO_BROWSER`, `CWC_NOT_CONNECTED`) surface on the **first
+  poll**, not on `send`. If you'd rather fail `send` early, `await this.connect()`
+  inside `beginPrompt` before returning the ticket.
+- The bridge's own `timeout_ms` (`CWC_TIMEOUT`) still bounds the request, so a
+  ticket that never gets an Apply eventually settles as failed — no separate TTL
+  needed for V0.
+- A settled-but-never-polled ticket lingers in the map; fine for V0. Add a
+  periodic sweep later if you want.
+
+### 3. `src/index.ts` — replace the one tool with two
+
+```ts
+server.registerTool(
+  'send_to_codewebchat',
+  {
+    title: 'Send Prompt To CodeWebChat',
+    description: 'Send a prompt to a CodeWebChat chatbot. Returns a ticket immediately; use poll_cwc_response to get the reply after the user clicks Apply Response.',
+    inputSchema: { /* same fields as before, minus nothing — keep url, text, etc. */ }
+  },
+  async (input) => {
+    try {
+      const { ticket } = bridge.beginPrompt(input)
+      return { content: [{ type: 'text', text: JSON.stringify({
+        status: 'pending', ticket,
+        next: 'Ask the user to click CodeWebChat Apply Response in the chatbot tab, then call poll_cwc_response with this ticket.'
+      }, null, 2) }] }
+    } catch (error) {
+      return { isError: true, content: [{ type: 'text', text: toErrorText(error) }] }
+    }
+  }
+)
+
+server.registerTool(
+  'poll_cwc_response',
+  {
+    title: 'Poll CodeWebChat Response',
+    description: 'Check whether the chatbot reply for a ticket is ready. Returns the reply when done, or status "pending" if the user has not clicked Apply Response yet.',
+    inputSchema: {
+      ticket: z.string().min(1).describe('Ticket returned by send_to_codewebchat.'),
+      wait_ms: z.number().int().positive().max(30000).optional().describe('Max time to wait this call (default 10000, cap 30000).')
+    }
+  },
+  async ({ ticket, wait_ms }) => {
+    try {
+      const result = await bridge.pollPrompt(ticket, wait_ms)
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+    } catch (error) {
+      return { isError: true, content: [{ type: 'text', text: toErrorText(error) }] }
+    }
+  }
+)
+```
+
+Update the server `instructions` to describe the two-step flow (send → ask user
+to click Apply → poll until `done`).
+
+### 4. Test it in the Inspector
+
+1. `send_to_codewebchat` with `url` + `text` → returns `{ status: 'pending', ticket }` instantly.
+2. Click the amber **Apply Response** button in the chatbot tab.
+3. `poll_cwc_response` with the ticket → `{ status: 'pending' }` if you haven't
+   clicked yet, `{ status: 'done', response: "..." }` once you have.
+
+Because each call returns in ≤30s, the Inspector's Maximum Total Timeout no
+longer matters — the human delay lives between calls, not inside one.
+
+---
+
 Companion to `03-step-register-mcp-tools.md` and the decision in ADR-009
 (`07-...`). This is the recommended answer to the blocking-call problem
 (`08-adapt-from-repo-harness/07-...`): instead of one tool that blocks on an

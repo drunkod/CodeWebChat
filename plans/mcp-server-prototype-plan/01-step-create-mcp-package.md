@@ -135,9 +135,11 @@ export type ClientIdAssignmentMessage = {
   client_id: number
 }
 
+// NOTE (verified against apps/editor/src/services/websocket-server-process.ts):
+// the server sends ONLY `connected_browsers`. There is NO `has_connected_browsers`
+// field — derive "connected" from the array length, not a boolean.
 export type BrowserConnectionStatusMessage = {
   action: 'browser-connection-status'
-  has_connected_browsers: boolean
   connected_browsers?: Array<{
     id: number
     name?: string

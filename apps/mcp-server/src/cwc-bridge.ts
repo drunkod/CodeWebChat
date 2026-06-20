@@ -1,28 +1,3 @@
-# Step 2 — Build the CodeWebChat WebSocket Bridge
-
-## Goal
-
-Create the local bridge that connects the MCP server to the existing CodeWebChat WebSocket server as a VS Code-role client.
-
-This is the fastest prototype path because CodeWebChat already supports multiple editor-role clients. Each editor-role client receives a `client_id`, and the browser serializes prompt handling through its `chat_queue`. For the V0 MCP server, requests should still be serialized per MCP process because `client_id` identifies the connection, not an individual request.
-
-## Behavior
-
-The bridge must:
-
-1. Connect to `ws://localhost:55155?token=gemini-coder-vscode`.
-2. Wait for `client-id-assignment`.
-3. Track whether any browser extension is connected.
-4. Send `initialize-chat` messages.
-5. Wait for `apply-chat-response` for the assigned `client_id`.
-6. Read the clipboard only after `apply-chat-response` arrives.
-7. Reject empty or unchanged clipboard text.
-8. Serialize calls so concurrent MCP tool calls do not race on the same `client_id` and clipboard.
-9. **Immediately reject any in-flight promise if the WebSocket closes**, so the MCP client receives a fast error instead of waiting for `timeout_ms` to expire.
-
-## Complete file: `apps/mcp-server/src/cwc-bridge.ts`
-
-```ts
 import WebSocket from 'ws'
 import { CwcMcpError } from './errors.js'
 import type { ReadClipboard } from './clipboard.js'
@@ -63,7 +38,10 @@ const parseJson = (raw: string): CwcInboundMessage => {
   try {
     return JSON.parse(raw) as CwcInboundMessage
   } catch {
-    throw new CwcMcpError('Received a non-JSON message from CodeWebChat.', 'CWC_BAD_MESSAGE')
+    throw new CwcMcpError(
+      'Received a non-JSON message from CodeWebChat.',
+      'CWC_BAD_MESSAGE'
+    )
   }
 }
 
@@ -78,8 +56,6 @@ export class CwcBridge {
   private readonly connect_timeout_ms: number
   private readonly clipboard_read_delay_ms: number
   private active_request: Promise<unknown> = Promise.resolve()
-
-  // FIX: store both resolve and reject so the close handler can abort in-flight requests
   private pending_apply_response: {
     resolve: (message: ApplyChatResponseMessage) => void
     reject: (error: CwcMcpError) => void
@@ -116,6 +92,11 @@ export class CwcBridge {
       this.ws = ws
 
       const timer = setTimeout(() => {
+        try {
+          ws.terminate()
+        } catch {
+          // ignore terminate errors during connect timeout cleanup
+        }
         reject(
           new CwcMcpError(
             `Timed out connecting to CodeWebChat at ${this.ws_url}. Start the CodeWebChat WebSocket server first.`,
@@ -131,7 +112,17 @@ export class CwcBridge {
 
       ws.on('error', (error) => {
         clearTimeout(timer)
-        reject(error)
+        try {
+          ws.terminate()
+        } catch {
+          // ignore terminate errors during connect failure cleanup
+        }
+        reject(
+          new CwcMcpError(
+            `Could not connect to CodeWebChat at ${this.ws_url}. Start the CodeWebChat WebSocket server first. (${error instanceof Error ? error.message : String(error)})`,
+            'CWC_NOT_CONNECTED'
+          )
+        )
       })
 
       ws.on('close', () => {
@@ -140,9 +131,6 @@ export class CwcBridge {
         this.browser_connected = false
         this.connected_browser_count = 0
 
-        // FIX: reject any in-flight sendPromptAndWait so it does not hang until timeout_ms.
-        // Previously pending_apply_response was set to null, silently dropping the rejection
-        // and leaving the caller's promise suspended until the 5-minute timeout fired.
         if (this.pending_apply_response !== null) {
           this.pending_apply_response.reject(
             new CwcMcpError(
@@ -170,13 +158,19 @@ export class CwcBridge {
 
       const client_id = this.client_id
       if (client_id === null) {
-        throw new CwcMcpError('CodeWebChat did not assign a client_id.', 'CWC_NO_CLIENT_ID')
+        throw new CwcMcpError(
+          'CodeWebChat did not assign a client_id.',
+          'CWC_NO_CLIENT_ID'
+        )
       }
 
       const before_clipboard = await this.read_clipboard()
       const timeout_ms = input.timeout_ms ?? 300000
 
-      const apply_response_promise = this.waitForApplyResponse(client_id, timeout_ms)
+      const apply_response_promise = this.waitForApplyResponse(
+        client_id,
+        timeout_ms
+      )
 
       const message: InitializeChatMessage = {
         action: 'initialize-chat',
@@ -193,7 +187,7 @@ export class CwcBridge {
         options: input.options,
         raw_instructions: input.raw_instructions,
         edit_format: input.edit_format,
-        prompt_type: input.prompt_type,
+        prompt_type: input.prompt_type ?? 'edit-context',
         reuse_last_tab: input.reuse_last_tab,
         invocation_count: input.invocation_count
       }
@@ -204,7 +198,10 @@ export class CwcBridge {
 
       const after_clipboard = await this.read_clipboard()
       if (!after_clipboard.trim()) {
-        throw new CwcMcpError('Apply Response completed, but the clipboard was empty.', 'CWC_CLIPBOARD_EMPTY')
+        throw new CwcMcpError(
+          'Apply Response completed, but the clipboard was empty.',
+          'CWC_CLIPBOARD_EMPTY'
+        )
       }
 
       if (after_clipboard === before_clipboard) {
@@ -219,8 +216,8 @@ export class CwcBridge {
 
     const previous = this.active_request
     let release!: () => void
-    this.active_request = new Promise((resolve) => {
-      release = resolve
+    this.active_request = new Promise<void>((resolve) => {
+      release = () => resolve()
     })
 
     await previous
@@ -241,7 +238,6 @@ export class CwcBridge {
     }
 
     if (message.action === 'browser-connection-status') {
-      // The server sends only `connected_browsers`; there is no has_connected_browsers field.
       const status = message as BrowserConnectionStatusMessage
       this.connected_browser_count = status.connected_browsers?.length ?? 0
       this.browser_connected = this.connected_browser_count > 0
@@ -250,7 +246,6 @@ export class CwcBridge {
 
     if (message.action === 'apply-chat-response') {
       const apply_response = message as ApplyChatResponseMessage
-      // Only resolve if client_id matches — guards against stale messages after reconnect
       if (apply_response.client_id === this.client_id) {
         this.pending_apply_response?.resolve(apply_response)
       }
@@ -261,7 +256,10 @@ export class CwcBridge {
     const started_at = Date.now()
     while (this.client_id === null) {
       if (Date.now() - started_at > this.connect_timeout_ms) {
-        throw new CwcMcpError('Connected to CodeWebChat, but did not receive client-id-assignment.', 'CWC_NO_CLIENT_ID')
+        throw new CwcMcpError(
+          'Connected to CodeWebChat, but did not receive client-id-assignment.',
+          'CWC_NO_CLIENT_ID'
+        )
       }
       await sleep(50)
     }
@@ -269,7 +267,10 @@ export class CwcBridge {
 
   private assertReadyToSend(): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      throw new CwcMcpError('Not connected to CodeWebChat WebSocket server.', 'CWC_NOT_CONNECTED')
+      throw new CwcMcpError(
+        'Not connected to CodeWebChat WebSocket server.',
+        'CWC_NOT_CONNECTED'
+      )
     }
 
     if (!this.browser_connected) {
@@ -280,7 +281,10 @@ export class CwcBridge {
     }
   }
 
-  private async waitForApplyResponse(client_id: number, timeout_ms: number): Promise<ApplyChatResponseMessage> {
+  private async waitForApplyResponse(
+    client_id: number,
+    timeout_ms: number
+  ): Promise<ApplyChatResponseMessage> {
     return await new Promise<ApplyChatResponseMessage>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending_apply_response = null
@@ -292,7 +296,6 @@ export class CwcBridge {
         )
       }, timeout_ms)
 
-      // FIX: store both resolve and reject so ws.on('close') can abort this promise immediately
       this.pending_apply_response = {
         resolve: (message) => {
           if (message.client_id !== client_id) return
@@ -309,31 +312,3 @@ export class CwcBridge {
     })
   }
 }
-```
-
-## Key fix: disconnect while in-flight
-
-The original `ws.on('close')` handler set `pending_apply_response = null`, silently dropping
-the rejection path. The promise returned by `waitForApplyResponse` would remain suspended
-until `timeout_ms` (default 5 minutes) fired.
-
-The fix stores a `{ resolve, reject }` pair instead of a bare callback. The close handler
-calls `reject()` immediately with `CWC_DISCONNECTED`, propagating the error up through
-`sendPromptAndWait` and back to the MCP client in milliseconds:
-
-```
-ws.on('close')
-  → pending_apply_response.reject(CWC_DISCONNECTED)
-  → waitForApplyResponse rejects
-  → sendPromptAndWait rejects
-  → MCP tool returns isError: true with message
-```
-
-## Notes for the architect
-
-- This bridge intentionally serializes tool calls.
-- Serialization avoids ambiguity because the current protocol has no per-request `request_id`.
-- The V0 bridge treats the clipboard as a transport fallback, not as a durable API.
-- V1 should include response text in the WebSocket payload and add `request_id` to both prompt and response messages.
-- The `clipboard_read_delay_ms` default of 250ms is safe: the browser extension already sleeps 500ms before sending `apply-chat-response`, so the clipboard is written before the signal arrives.
-- **`prompt_type` gates the Apply Response button (verified in `apps/browser/.../send-prompt-content-script.ts`).** The browser extension only injects the `cwc-apply-response-button` when `prompt_type` is one of `edit-context`, `code-at-cursor`, or `find-relevant-files` (`inject_button = prompt_type ∈ {...}`). With no `prompt_type`, the button never appears and the whole V0 clipboard-apply flow stalls (the tool waits forever for an `apply-chat-response` that can't be triggered). The bridge therefore defaults it: `prompt_type: input.prompt_type ?? 'edit-context'`. A caller may still override it. This dependency on the extension's button-injection heuristic is one of the fragilities Phase C removes by carrying `request_id` + `response_text` directly.

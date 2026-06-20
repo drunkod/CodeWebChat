@@ -530,7 +530,7 @@ export class CwcBridgeV1 {
     }
 
     if (message.action === 'browser-connection-status') {
-      this.browser_connected = Boolean(message.has_connected_browsers)
+      this.browser_connected = (message.connected_browsers?.length ?? 0) > 0
       return
     }
 

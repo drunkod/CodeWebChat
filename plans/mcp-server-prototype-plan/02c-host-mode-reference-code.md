@@ -364,8 +364,8 @@ export class ClientTransport implements CwcTransport {
       this.client_id = (message as ClientIdAssignmentMessage).client_id
     } else if (message.action === 'browser-connection-status') {
       const s = message as BrowserConnectionStatusMessage
-      this.browser_connected = Boolean(s.has_connected_browsers)
-      this.connected_browser_count = s.connected_browsers?.length ?? (s.has_connected_browsers ? 1 : 0)
+      this.connected_browser_count = s.connected_browsers?.length ?? 0
+      this.browser_connected = this.connected_browser_count > 0
     } else if (message.action === 'apply-chat-response') {
       this.apply_handler(message as ApplyChatResponseMessage)
     }

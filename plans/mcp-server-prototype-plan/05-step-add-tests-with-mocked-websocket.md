@@ -58,7 +58,6 @@ const createMockCwcServer = async () => {
     socket.send(
       JSON.stringify({
         action: 'browser-connection-status',
-        has_connected_browsers: true,
         connected_browsers: [{ id: 1, name: 'Mock Browser' }]
       })
     )
@@ -208,7 +207,7 @@ test('CwcBridge rejects immediately when WebSocket closes during in-flight reque
       }
       // Send handshake but never send apply-chat-response
       socket.send(JSON.stringify({ action: 'client-id-assignment', client_id: 99 }))
-      socket.send(JSON.stringify({ action: 'browser-connection-status', has_connected_browsers: true }))
+      socket.send(JSON.stringify({ action: 'browser-connection-status', connected_browsers: [{ id: 1 }] }))
     })
 
     return {
@@ -291,7 +290,6 @@ const createNoBrowserServer = async () => {
     socket.send(
       JSON.stringify({
         action: 'browser-connection-status',
-        has_connected_browsers: false,
         connected_browsers: []
       })
     )

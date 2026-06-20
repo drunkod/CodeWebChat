@@ -4,3 +4,7 @@
 draft/
 graphify-out/
 .DS_Store
+
+# Build outputs and deps anywhere
+node_modules/
+dist/

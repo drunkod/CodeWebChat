@@ -226,8 +226,8 @@ one process can bind 55155.
 
 ## ADR-009: Long-running tool call strategy (blocking vs split send+poll)
 
-**Status:** Open — decide before finalizing the Step 3 tool schema
-**Date:** 2026-06
+**Status:** Accepted — **Option C (split `send` + `poll`)**, after Phase A (A.4) proved the blocking path works
+**Date:** 2026-06-20
 
 ### Context
 
@@ -237,22 +237,27 @@ Response). repo-harness has no pattern for this. See
 
 ### Decision
 
-To be chosen with the developer / based on the target MCP client's request
-timeout:
+**Chosen: Option C — split `send_to_codewebchat` + `poll_cwc_response`.** `send`
+returns a ticket immediately; `poll` returns the reply when ready or `pending`
+after a short capped wait (≤30s). This survives MCP-client request timeouts (the
+Inspector's 60s "Maximum Total Timeout" forced this realization during A.4),
+because the unbounded human delay now lives *between* calls, not inside one.
 
-- **Option A — single blocking call** with a bounded `timeout_ms`, returns
-  `CWC_TIMEOUT` if no click. Simple; risks the client's own request timeout and
-  model retries spamming the chatbot.
-- **Option C — split `send_to_codewebchat` + `poll_cwc_response`** (recommended):
-  send returns immediately with a ticket; poll returns when ready or after a
-  short capped wait. Survives client timeouts; more moving parts.
+Implementation for the current client-mode code reuses the existing
+`sendPromptAndWait` via `beginPrompt`/`pollPrompt` — see the "Client-mode
+adaptation" section of `03b-split-send-poll-reference-code.md`. When Phase B lands,
+swap to the transport-based `RequestRegistry`.
 
-This choice sets the tool input schema and error codes, so it must be locked
-before Step 3 is finalized.
+Rejected: Option A (single blocking call) — works (proven in A.4) but a real
+client can abort mid-block, and naive model retries would re-spam the chatbot.
 
 ### Consequences
 
-- Decision recorded here once made; `guards.ts` and the Step 3 schema follow it.
+- New error code `CWC_UNKNOWN_TICKET` (and optional `CWC_BUSY`).
+- Tool surface becomes two tools; server `instructions` describe the
+  send → click Apply → poll flow.
+- Once Phase C adds `request_id`, concurrent tickets become safe (drop the
+  one-in-flight serialization).
 ```
 
 ---
