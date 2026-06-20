@@ -8,3 +8,6 @@ graphify-out/
 # Build outputs and deps anywhere
 node_modules/
 dist/
+
+# Local MCP Inspector config (machine-specific node path)
+apps/mcp-server/inspector-config.json

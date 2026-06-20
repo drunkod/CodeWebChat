@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import WebSocket from 'ws'
 import { CwcMcpError } from './errors.js'
 import type { ReadClipboard } from './clipboard.js'
@@ -56,6 +57,15 @@ export class CwcBridge {
   private readonly connect_timeout_ms: number
   private readonly clipboard_read_delay_ms: number
   private active_request: Promise<unknown> = Promise.resolve()
+  private requests = new Map<
+    string,
+    {
+      promise: Promise<string>
+      settled: boolean
+      result?: string
+      error?: unknown
+    }
+  >()
   private pending_apply_response: {
     resolve: (message: ApplyChatResponseMessage) => void
     reject: (error: CwcMcpError) => void
@@ -149,6 +159,78 @@ export class CwcBridge {
     })
 
     await this.waitForClientId()
+  }
+
+  public beginPrompt(input: SendPromptInput): { ticket: string } {
+    const ticket = randomUUID()
+    const promise = this.sendPromptAndWait(input)
+    const record: {
+      promise: Promise<string>
+      settled: boolean
+      result?: string
+      error?: unknown
+    } = {
+      promise,
+      settled: false
+    }
+
+    promise.then(
+      (result) => {
+        record.result = result
+        record.settled = true
+      },
+      (error) => {
+        record.error = error
+        record.settled = true
+      }
+    )
+
+    this.requests.set(ticket, record)
+    return { ticket }
+  }
+
+  public async pollPrompt(
+    ticket: string,
+    wait_ms?: number
+  ): Promise<
+    { status: 'done'; response: string } | { status: 'pending'; ticket: string }
+  > {
+    const record = this.requests.get(ticket)
+    if (!record) {
+      throw new CwcMcpError(
+        `Unknown or expired ticket: ${ticket}. Call send_to_codewebchat again.`,
+        'CWC_UNKNOWN_TICKET'
+      )
+    }
+
+    const cap = Math.min(wait_ms ?? 10000, 30000)
+    const pendingSentinel = Symbol('pending')
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timed = new Promise<typeof pendingSentinel>((resolve) => {
+      timer = setTimeout(() => resolve(pendingSentinel), cap)
+    })
+
+    try {
+      const outcome = await Promise.race([
+        record.promise.then(
+          () => 'settled' as const,
+          () => 'settled' as const
+        ),
+        timed
+      ])
+
+      if (outcome === pendingSentinel && !record.settled) {
+        return { status: 'pending', ticket }
+      }
+
+      this.requests.delete(ticket)
+      if (record.error) throw record.error
+      return { status: 'done', response: record.result ?? '' }
+    } finally {
+      if (timer !== undefined) {
+        clearTimeout(timer)
+      }
+    }
   }
 
   public async sendPromptAndWait(input: SendPromptInput): Promise<string> {

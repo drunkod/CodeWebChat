@@ -1,6 +1,7 @@
 # Step 3b — Split `send` + `poll` tools (complete code, ADR-009 Option C)
 
 > ## ⭐ Recommended path for the current code: the client-mode adaptation below
+>
 > The full `RequestRegistry` further down assumes the Phase B `CwcTransport`
 > abstraction, which you don't have yet. Since you're doing the split **before**
 > Phase B, use the **Client-mode adaptation** in the next section — it reuses your
@@ -66,24 +67,30 @@ public async pollPrompt(
   }
   const cap = Math.min(wait_ms ?? 10000, 30000)
   const pendingSentinel = Symbol('pending')
-  const timed = new Promise<typeof pendingSentinel>((res) =>
-    setTimeout(() => res(pendingSentinel), cap)
-  )
-  // Wait for either the request to settle or the short cap to elapse.
-  const outcome = await Promise.race([
-    rec.promise.then(() => 'settled' as const, () => 'settled' as const),
-    timed
-  ])
-  if (outcome === pendingSentinel && !rec.settled) {
-    return { status: 'pending', ticket }   // model should poll again
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timed = new Promise<typeof pendingSentinel>((res) => {
+    timer = setTimeout(() => res(pendingSentinel), cap)
+  })
+  try {
+    // Wait for either the request to settle or the short cap to elapse.
+    const outcome = await Promise.race([
+      rec.promise.then(() => 'settled' as const, () => 'settled' as const),
+      timed
+    ])
+    if (outcome === pendingSentinel && !rec.settled) {
+      return { status: 'pending', ticket }   // model should poll again
+    }
+    this.requests.delete(ticket)             // settled: hand back result / throw error
+    if (rec.error) throw rec.error
+    return { status: 'done', response: rec.result! }
+  } finally {
+    if (timer) clearTimeout(timer)           // don't leave a live timer behind
   }
-  this.requests.delete(ticket)             // settled: hand back result / throw error
-  if (rec.error) throw rec.error
-  return { status: 'done', response: rec.result! }
 }
 ```
 
 Notes:
+
 - Setup errors (`CWC_NO_BROWSER`, `CWC_NOT_CONNECTED`) surface on the **first
   poll**, not on `send`. If you'd rather fail `send` early, `await this.connect()`
   inside `beginPrompt` before returning the ticket.
@@ -100,18 +107,36 @@ server.registerTool(
   'send_to_codewebchat',
   {
     title: 'Send Prompt To CodeWebChat',
-    description: 'Send a prompt to a CodeWebChat chatbot. Returns a ticket immediately; use poll_cwc_response to get the reply after the user clicks Apply Response.',
-    inputSchema: { /* same fields as before, minus nothing — keep url, text, etc. */ }
+    description:
+      'Send a prompt to a CodeWebChat chatbot. Returns a ticket immediately; use poll_cwc_response to get the reply after the user clicks Apply Response.',
+    inputSchema: {
+      /* same fields as before, minus nothing — keep url, text, etc. */
+    }
   },
   async (input) => {
     try {
       const { ticket } = bridge.beginPrompt(input)
-      return { content: [{ type: 'text', text: JSON.stringify({
-        status: 'pending', ticket,
-        next: 'Ask the user to click CodeWebChat Apply Response in the chatbot tab, then call poll_cwc_response with this ticket.'
-      }, null, 2) }] }
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                status: 'pending',
+                ticket,
+                next: 'Ask the user to click CodeWebChat Apply Response in the chatbot tab, then call poll_cwc_response with this ticket.'
+              },
+              null,
+              2
+            )
+          }
+        ]
+      }
     } catch (error) {
-      return { isError: true, content: [{ type: 'text', text: toErrorText(error) }] }
+      return {
+        isError: true,
+        content: [{ type: 'text', text: toErrorText(error) }]
+      }
     }
   }
 )
@@ -120,18 +145,33 @@ server.registerTool(
   'poll_cwc_response',
   {
     title: 'Poll CodeWebChat Response',
-    description: 'Check whether the chatbot reply for a ticket is ready. Returns the reply when done, or status "pending" if the user has not clicked Apply Response yet.',
+    description:
+      'Check whether the chatbot reply for a ticket is ready. Returns the reply when done, or status "pending" if the user has not clicked Apply Response yet.',
     inputSchema: {
-      ticket: z.string().min(1).describe('Ticket returned by send_to_codewebchat.'),
-      wait_ms: z.number().int().positive().max(30000).optional().describe('Max time to wait this call (default 10000, cap 30000).')
+      ticket: z
+        .string()
+        .min(1)
+        .describe('Ticket returned by send_to_codewebchat.'),
+      wait_ms: z
+        .number()
+        .int()
+        .positive()
+        .max(30000)
+        .optional()
+        .describe('Max time to wait this call (default 10000, cap 30000).')
     }
   },
   async ({ ticket, wait_ms }) => {
     try {
       const result = await bridge.pollPrompt(ticket, wait_ms)
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
+      }
     } catch (error) {
-      return { isError: true, content: [{ type: 'text', text: toErrorText(error) }] }
+      return {
+        isError: true,
+        content: [{ type: 'text', text: toErrorText(error) }]
+      }
     }
   }
 )
@@ -209,7 +249,10 @@ blocking runner, but keyed by ticket so calls don't block.
 import { randomUUID } from 'node:crypto'
 import type { ReadClipboard } from './clipboard.js'
 import { CwcMcpError } from './errors.js'
-import type { ApplyChatResponseMessage, InitializeChatMessage } from './protocol.js'
+import type {
+  ApplyChatResponseMessage,
+  InitializeChatMessage
+} from './protocol.js'
 import { type CwcTransport, sleep } from './transport.js'
 import type { SendPromptInput } from './prompt-runner.js'
 
@@ -231,9 +274,9 @@ export type PollResult =
 
 interface RegistryOptions {
   clipboard_read_delay_ms?: number
-  poll_wait_cap_ms?: number       // max a single poll will block (default 30s)
-  default_ttl_ms?: number         // ticket lifetime (default 300s)
-  require_request_id?: boolean    // true once Phase C ships (safe concurrency)
+  poll_wait_cap_ms?: number // max a single poll will block (default 30s)
+  default_ttl_ms?: number // ticket lifetime (default 300s)
+  require_request_id?: boolean // true once Phase C ships (safe concurrency)
 }
 
 export class RequestRegistry {
@@ -260,25 +303,32 @@ export class RequestRegistry {
     setInterval(() => this.gc(), 30_000).unref?.()
   }
 
-  status() { return this.transport.status() }
+  status() {
+    return this.transport.status()
+  }
 
   /** Fire the prompt; return a ticket immediately. Does NOT wait for Apply. */
   async begin(input: SendPromptInput): Promise<{ ticket: string }> {
     const issue = async (): Promise<{ ticket: string }> => {
-      const { client_id } = await this.transport.ensureReady(input.connect_timeout_ms ?? 3000)
+      const { client_id } = await this.transport.ensureReady(
+        input.connect_timeout_ms ?? 3000
+      )
       const ticket = randomUUID()
       const before = await this.read_clipboard().catch(() => '')
       const ttl = input.timeout_ms ?? this.ttl
       this.records.set(ticket, {
-        ticket, client_id, state: 'pending',
-        before_clipboard: before, expires_at: Date.now() + ttl
+        ticket,
+        client_id,
+        state: 'pending',
+        before_clipboard: before,
+        expires_at: Date.now() + ttl
       })
       const message: InitializeChatMessage = {
         action: 'initialize-chat',
         client_id,
-        request_id: ticket,           // ties the reply back to this ticket (Phase C)
+        request_id: ticket, // ties the reply back to this ticket (Phase C)
         text: input.text,
-        url: input.url,
+        url: input.url
         // ...rest of the fields unchanged
       }
       this.transport.sendInitializeChat(message)
@@ -294,7 +344,11 @@ export class RequestRegistry {
     let release!: () => void
     this.active_chain = new Promise<void>((r) => (release = r))
     await previous
-    try { return await issue() } finally { release() }
+    try {
+      return await issue()
+    } finally {
+      release()
+    }
   }
 
   /** Return the reply if ready; else 'pending' after a short capped wait. */
@@ -308,8 +362,14 @@ export class RequestRegistry {
     }
     const deadline = Date.now() + Math.min(wait_ms ?? 10_000, this.poll_cap)
     for (;;) {
-      if (rec.state === 'done') { this.records.delete(ticket); return { status: 'done', response: rec.response! } }
-      if (rec.state === 'failed') { this.records.delete(ticket); throw rec.error! }
+      if (rec.state === 'done') {
+        this.records.delete(ticket)
+        return { status: 'done', response: rec.response! }
+      }
+      if (rec.state === 'failed') {
+        this.records.delete(ticket)
+        throw rec.error!
+      }
       if (Date.now() >= deadline) return { status: 'pending', ticket }
       await sleep(250)
     }
@@ -321,20 +381,32 @@ export class RequestRegistry {
     const rec = this.match(message)
     if (!rec || rec.state !== 'pending') return
     try {
-      if (typeof message.response_text === 'string' && message.response_text.trim()) {
-        rec.response = message.response_text        // Phase C inline path
+      if (
+        typeof message.response_text === 'string' &&
+        message.response_text.trim()
+      ) {
+        rec.response = message.response_text // Phase C inline path
       } else {
-        await sleep(this.clipboard_delay)           // V0 fallback
+        await sleep(this.clipboard_delay) // V0 fallback
         const after = await this.read_clipboard()
-        if (!after.trim()) throw new CwcMcpError('Apply Response completed, but the clipboard was empty.', 'CWC_CLIPBOARD_EMPTY')
-        if (after === rec.before_clipboard) throw new CwcMcpError(
-          'Apply Response completed, but the clipboard did not change.', 'CWC_CLIPBOARD_UNCHANGED'
-        )
+        if (!after.trim())
+          throw new CwcMcpError(
+            'Apply Response completed, but the clipboard was empty.',
+            'CWC_CLIPBOARD_EMPTY'
+          )
+        if (after === rec.before_clipboard)
+          throw new CwcMcpError(
+            'Apply Response completed, but the clipboard did not change.',
+            'CWC_CLIPBOARD_UNCHANGED'
+          )
         rec.response = after
       }
       rec.state = 'done'
     } catch (e) {
-      rec.error = e instanceof CwcMcpError ? e : new CwcMcpError(String(e), 'CWC_BAD_MESSAGE')
+      rec.error =
+        e instanceof CwcMcpError
+          ? e
+          : new CwcMcpError(String(e), 'CWC_BAD_MESSAGE')
       rec.state = 'failed'
     }
   }
@@ -343,14 +415,18 @@ export class RequestRegistry {
     if (message.request_id) return this.records.get(message.request_id)
     // Pre-Phase-C fallback: the single pending record for this client_id.
     for (const rec of this.records.values()) {
-      if (rec.state === 'pending' && rec.client_id === message.client_id) return rec
+      if (rec.state === 'pending' && rec.client_id === message.client_id)
+        return rec
     }
     return undefined
   }
 
   private failAllPending(error: CwcMcpError): void {
     for (const rec of this.records.values()) {
-      if (rec.state === 'pending') { rec.error = error; rec.state = 'failed' }
+      if (rec.state === 'pending') {
+        rec.error = error
+        rec.state = 'failed'
+      }
     }
   }
 
@@ -358,11 +434,15 @@ export class RequestRegistry {
     const now = Date.now()
     for (const [ticket, rec] of this.records) {
       if (rec.state === 'pending' && now > rec.expires_at) {
-        rec.error = new CwcMcpError('Ticket expired before Apply Response.', 'CWC_TIMEOUT')
+        rec.error = new CwcMcpError(
+          'Ticket expired before Apply Response.',
+          'CWC_TIMEOUT'
+        )
         rec.state = 'failed'
       }
       // drop resolved/expired records after a grace period
-      if (rec.state !== 'pending' && now > rec.expires_at + 60_000) this.records.delete(ticket)
+      if (rec.state !== 'pending' && now > rec.expires_at + 60_000)
+        this.records.delete(ticket)
     }
   }
 }
@@ -377,7 +457,7 @@ import { z } from 'zod'
 import { RequestRegistry } from './request-registry.js'
 // transport selected by --mode as in 02c
 const registry = new RequestRegistry(transport, readSystemClipboard, {
-  require_request_id: false   // flip to true once Phase C (browser sends request_id) ships
+  require_request_id: false // flip to true once Phase C (browser sends request_id) ships
 })
 
 const server = new McpServer(
@@ -398,7 +478,8 @@ server.registerTool(
   'send_to_codewebchat',
   {
     title: 'Send Prompt To CodeWebChat',
-    description: 'Send a prompt to a CodeWebChat chatbot. Returns a ticket immediately; use poll_cwc_response to retrieve the reply after the user clicks Apply Response.',
+    description:
+      'Send a prompt to a CodeWebChat chatbot. Returns a ticket immediately; use poll_cwc_response to retrieve the reply after the user clicks Apply Response.',
     inputSchema: {
       url: z.string().url(),
       text: z.string().min(1),
@@ -413,17 +494,26 @@ server.registerTool(
     try {
       const { ticket } = await registry.begin(input)
       return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            status: 'pending',
-            ticket,
-            next: 'Ask the user to click CodeWebChat Apply Response, then call poll_cwc_response with this ticket.'
-          }, null, 2)
-        }]
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                status: 'pending',
+                ticket,
+                next: 'Ask the user to click CodeWebChat Apply Response, then call poll_cwc_response with this ticket.'
+              },
+              null,
+              2
+            )
+          }
+        ]
       }
     } catch (error) {
-      return { isError: true, content: [{ type: 'text', text: toErrorText(error) }] }
+      return {
+        isError: true,
+        content: [{ type: 'text', text: toErrorText(error) }]
+      }
     }
   }
 )
@@ -432,18 +522,33 @@ server.registerTool(
   'poll_cwc_response',
   {
     title: 'Poll CodeWebChat Response',
-    description: 'Check whether the chatbot reply for a ticket is ready. Returns the reply when done, or status "pending" if the user has not clicked Apply Response yet.',
+    description:
+      'Check whether the chatbot reply for a ticket is ready. Returns the reply when done, or status "pending" if the user has not clicked Apply Response yet.',
     inputSchema: {
-      ticket: z.string().min(1).describe('Ticket returned by send_to_codewebchat.'),
-      wait_ms: z.number().int().positive().max(30_000).optional().describe('Max time to wait this call (default 10000, cap 30000).')
+      ticket: z
+        .string()
+        .min(1)
+        .describe('Ticket returned by send_to_codewebchat.'),
+      wait_ms: z
+        .number()
+        .int()
+        .positive()
+        .max(30_000)
+        .optional()
+        .describe('Max time to wait this call (default 10000, cap 30000).')
     }
   },
   async ({ ticket, wait_ms }) => {
     try {
       const result = await registry.poll(ticket, wait_ms)
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
+      }
     } catch (error) {
-      return { isError: true, content: [{ type: 'text', text: toErrorText(error) }] }
+      return {
+        isError: true,
+        content: [{ type: 'text', text: toErrorText(error) }]
+      }
     }
   }
 )
@@ -460,19 +565,30 @@ Annotate per `08-.../04`: `poll_cwc_response` is `readOnlyHint: true`,
 test('split: send returns a ticket without waiting', async () => {
   const transport = new FakeTransport()
   const registry = new RequestRegistry(transport, async () => '')
-  const { ticket } = await registry.begin({ url: 'https://claude.ai/new', text: 'hi' })
-  assert.ok(ticket)                        // resolved before any apply-chat-response
+  const { ticket } = await registry.begin({
+    url: 'https://claude.ai/new',
+    text: 'hi'
+  })
+  assert.ok(ticket) // resolved before any apply-chat-response
 })
 
 test('split: poll returns pending, then done after apply', async () => {
   const transport = new FakeTransport()
   const registry = new RequestRegistry(transport, async () => '')
-  const { ticket } = await registry.begin({ url: 'https://claude.ai/new', text: 'hi' })
+  const { ticket } = await registry.begin({
+    url: 'https://claude.ai/new',
+    text: 'hi'
+  })
 
-  const first = await registry.poll(ticket, 300)   // no apply yet
+  const first = await registry.poll(ticket, 300) // no apply yet
   assert.equal(first.status, 'pending')
 
-  transport.emitApply({ action: 'apply-chat-response', client_id: 1, request_id: ticket, response_text: 'REPLY' })
+  transport.emitApply({
+    action: 'apply-chat-response',
+    client_id: 1,
+    request_id: ticket,
+    response_text: 'REPLY'
+  })
   const second = await registry.poll(ticket, 2000)
   assert.deepEqual(second, { status: 'done', response: 'REPLY' })
 })
@@ -485,7 +601,10 @@ test('split: unknown ticket -> CWC_UNKNOWN_TICKET', async () => {
 test('split: disconnect fails the pending ticket', async () => {
   const transport = new FakeTransport()
   const registry = new RequestRegistry(transport, async () => '')
-  const { ticket } = await registry.begin({ url: 'https://claude.ai/new', text: 'hi' })
+  const { ticket } = await registry.begin({
+    url: 'https://claude.ai/new',
+    text: 'hi'
+  })
   transport.emitClose(new CwcMcpError('gone', 'CWC_DISCONNECTED'))
   await assert.rejects(() => registry.poll(ticket, 100), /CWC_DISCONNECTED/)
 })

@@ -12,9 +12,9 @@ The design separates two concerns:
 
 - **`PromptRunner`** — mode-agnostic. Owns serialization, the clipboard
   before/after guard, the apply-response timeout, and disconnect rejection. This
-  is your Step 2 logic, lifted out so it works against *any* transport.
-- **`CwcTransport`** — mode-specific. Only knows how to *become ready*, *send an
-  `initialize-chat`*, and *emit* `apply-chat-response` / `close`.
+  is your Step 2 logic, lifted out so it works against _any_ transport.
+- **`CwcTransport`** — mode-specific. Only knows how to _become ready_, _send an
+  `initialize-chat`_, and _emit_ `apply-chat-response` / `close`.
 
 ```
 PromptRunner ──uses──▶ CwcTransport
@@ -41,8 +41,8 @@ export class CwcMcpError extends Error {
       | 'CWC_CLIPBOARD_UNCHANGED'
       | 'CWC_BAD_MESSAGE'
       | 'CWC_DISCONNECTED'
-      | 'CWC_PORT_IN_USE'      // NEW (host mode): 55155 already bound
-      | 'CWC_BROWSER_GONE'     // NEW (host mode): browser socket closed mid-request
+      | 'CWC_PORT_IN_USE' // NEW (host mode): 55155 already bound
+      | 'CWC_BROWSER_GONE' // NEW (host mode): browser socket closed mid-request
   ) {
     super(message)
     this.name = 'CwcMcpError'
@@ -65,8 +65,8 @@ export type CwcMode = 'host' | 'client'
 
 export type BridgeStatus = {
   mode: CwcMode
-  hosting: boolean              // host mode: are we bound to the port?
-  websocket_connected: boolean  // client mode: is our outbound socket open?
+  hosting: boolean // host mode: are we bound to the port?
+  websocket_connected: boolean // client mode: is our outbound socket open?
   client_id: number | null
   browser_connected: boolean
   connected_browser_count: number
@@ -108,9 +108,21 @@ export const sleep = (ms: number): Promise<void> =>
 
 ---
 
-## 3. `src/prompt-runner.ts` — mode-agnostic orchestration
+## 3. Orchestration over the transport
 
-This is your Step 2 `sendPromptAndWait` logic, now decoupled from the socket.
+> ⚠️ **Updated after ADR-009 (split chosen).** Use the **ticket-based
+> `RequestRegistry`** from `03b-split-send-poll-reference-code.md` (the
+> transport version) as the orchestrator over `CwcTransport` — it gives you
+> `begin()`/`poll()` so the tools never block. The blocking `PromptRunner` shown
+> immediately below is kept only as a reference for the single-call model; **skip
+> it** and wire `RequestRegistry(transport, readSystemClipboard)` instead. The
+> clipboard before/after guard that lived in `sendPromptAndWait` now lives in
+> `RequestRegistry.onApply`, so `CwcTransport` stays a pure transport.
+
+### (reference only) `src/prompt-runner.ts` — blocking orchestration
+
+This is your Step 2 `sendPromptAndWait` logic, decoupled from the socket — kept
+for reference; not used now that split is chosen.
 
 ```ts
 import type { ReadClipboard } from './clipboard.js'
@@ -121,7 +133,10 @@ import type {
 } from './protocol.js'
 import { type CwcTransport, sleep } from './transport.js'
 
-export type SendPromptInput = Omit<InitializeChatMessage, 'action' | 'client_id'> & {
+export type SendPromptInput = Omit<
+  InitializeChatMessage,
+  'action' | 'client_id'
+> & {
   timeout_ms?: number
   connect_timeout_ms?: number
 }
@@ -171,7 +186,9 @@ export class PromptRunner {
   }
 
   private async run(input: SendPromptInput): Promise<string> {
-    const { client_id } = await this.transport.ensureReady(input.connect_timeout_ms ?? 3000)
+    const { client_id } = await this.transport.ensureReady(
+      input.connect_timeout_ms ?? 3000
+    )
     this.current_client_id = client_id
 
     const before_clipboard = await this.read_clipboard()
@@ -204,7 +221,10 @@ export class PromptRunner {
 
     const after_clipboard = await this.read_clipboard()
     if (!after_clipboard.trim()) {
-      throw new CwcMcpError('Apply Response completed, but the clipboard was empty.', 'CWC_CLIPBOARD_EMPTY')
+      throw new CwcMcpError(
+        'Apply Response completed, but the clipboard was empty.',
+        'CWC_CLIPBOARD_EMPTY'
+      )
     }
     if (after_clipboard === before_clipboard) {
       throw new CwcMcpError(
@@ -215,14 +235,19 @@ export class PromptRunner {
     return after_clipboard
   }
 
-  private waitForApply(client_id: number, timeout_ms: number): Promise<ApplyChatResponseMessage> {
+  private waitForApply(
+    client_id: number,
+    timeout_ms: number
+  ): Promise<ApplyChatResponseMessage> {
     return new Promise<ApplyChatResponseMessage>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending = null
-        reject(new CwcMcpError(
-          `Timed out after ${timeout_ms}ms waiting for Apply Response. The user must click Apply Response in the chatbot tab.`,
-          'CWC_TIMEOUT'
-        ))
+        reject(
+          new CwcMcpError(
+            `Timed out after ${timeout_ms}ms waiting for Apply Response. The user must click Apply Response in the chatbot tab.`,
+            'CWC_TIMEOUT'
+          )
+        )
       }, timeout_ms)
 
       this.pending = {
@@ -266,9 +291,18 @@ import {
   type CwcInboundMessage,
   type InitializeChatMessage
 } from './protocol.js'
-import { type BridgeStatus, type CwcTransport, type SendContext, sleep } from './transport.js'
+import {
+  type BridgeStatus,
+  type CwcTransport,
+  type SendContext,
+  sleep
+} from './transport.js'
 
-type ClientOptions = { ws_url?: string; vscode_token?: string; connect_timeout_ms?: number }
+type ClientOptions = {
+  ws_url?: string
+  vscode_token?: string
+  connect_timeout_ms?: number
+}
 
 export class ClientTransport implements CwcTransport {
   readonly mode = 'client' as const
@@ -288,8 +322,12 @@ export class ClientTransport implements CwcTransport {
     this.connect_timeout_ms = opts.connect_timeout_ms ?? 3000
   }
 
-  onApplyResponse(h: (m: ApplyChatResponseMessage) => void) { this.apply_handler = h }
-  onClose(h: (e: CwcMcpError) => void) { this.close_handler = h }
+  onApplyResponse(h: (m: ApplyChatResponseMessage) => void) {
+    this.apply_handler = h
+  }
+  onClose(h: (e: CwcMcpError) => void) {
+    this.close_handler = h
+  }
 
   status(): BridgeStatus {
     return {
@@ -313,19 +351,27 @@ export class ClientTransport implements CwcTransport {
       )
     }
     if (this.client_id === null) {
-      throw new CwcMcpError('CodeWebChat did not assign a client_id.', 'CWC_NO_CLIENT_ID')
+      throw new CwcMcpError(
+        'CodeWebChat did not assign a client_id.',
+        'CWC_NO_CLIENT_ID'
+      )
     }
     return { client_id: this.client_id }
   }
 
   sendInitializeChat(message: InitializeChatMessage): void {
     if (this.ws?.readyState !== WebSocket.OPEN) {
-      throw new CwcMcpError('Not connected to CodeWebChat WebSocket server.', 'CWC_NOT_CONNECTED')
+      throw new CwcMcpError(
+        'Not connected to CodeWebChat WebSocket server.',
+        'CWC_NOT_CONNECTED'
+      )
     }
     this.ws.send(JSON.stringify(message))
   }
 
-  async close(): Promise<void> { this.ws?.close() }
+  async close(): Promise<void> {
+    this.ws?.close()
+  }
 
   private async connect(): Promise<void> {
     const url = new URL(this.ws_url)
@@ -335,21 +381,37 @@ export class ClientTransport implements CwcTransport {
     await new Promise<void>((resolve, reject) => {
       const ws = new WebSocket(url.toString())
       this.ws = ws
-      const timer = setTimeout(() => reject(new CwcMcpError(
-        `Timed out connecting to CodeWebChat at ${this.ws_url}. Start the CodeWebChat WebSocket server first.`,
-        'CWC_NOT_CONNECTED'
-      )), this.connect_timeout_ms)
+      const timer = setTimeout(
+        () =>
+          reject(
+            new CwcMcpError(
+              `Timed out connecting to CodeWebChat at ${this.ws_url}. Start the CodeWebChat WebSocket server first.`,
+              'CWC_NOT_CONNECTED'
+            )
+          ),
+        this.connect_timeout_ms
+      )
 
-      ws.on('open', () => { clearTimeout(timer); resolve() })
-      ws.on('error', (e) => { clearTimeout(timer); reject(e) })
+      ws.on('open', () => {
+        clearTimeout(timer)
+        resolve()
+      })
+      ws.on('error', (e) => {
+        clearTimeout(timer)
+        reject(e)
+      })
       ws.on('message', (raw) => this.onMessage(raw.toString()))
       ws.on('close', () => {
-        this.ws = null; this.client_id = null
-        this.browser_connected = false; this.connected_browser_count = 0
-        this.close_handler(new CwcMcpError(
-          'CodeWebChat WebSocket closed while waiting for Apply Response. The VS Code extension may have restarted. Retry the tool call.',
-          'CWC_DISCONNECTED'
-        ))
+        this.ws = null
+        this.client_id = null
+        this.browser_connected = false
+        this.connected_browser_count = 0
+        this.close_handler(
+          new CwcMcpError(
+            'CodeWebChat WebSocket closed while waiting for Apply Response. The VS Code extension may have restarted. Retry the tool call.',
+            'CWC_DISCONNECTED'
+          )
+        )
       })
     })
     await this.waitForClientId()
@@ -357,8 +419,14 @@ export class ClientTransport implements CwcTransport {
 
   private onMessage(raw: string): void {
     let message: CwcInboundMessage
-    try { message = JSON.parse(raw) as CwcInboundMessage }
-    catch { throw new CwcMcpError('Received a non-JSON message from CodeWebChat.', 'CWC_BAD_MESSAGE') }
+    try {
+      message = JSON.parse(raw) as CwcInboundMessage
+    } catch {
+      throw new CwcMcpError(
+        'Received a non-JSON message from CodeWebChat.',
+        'CWC_BAD_MESSAGE'
+      )
+    }
 
     if (message.action === 'client-id-assignment') {
       this.client_id = (message as ClientIdAssignmentMessage).client_id
@@ -375,7 +443,10 @@ export class ClientTransport implements CwcTransport {
     const started = Date.now()
     while (this.client_id === null) {
       if (Date.now() - started > this.connect_timeout_ms) {
-        throw new CwcMcpError('Connected to CodeWebChat, but did not receive client-id-assignment.', 'CWC_NO_CLIENT_ID')
+        throw new CwcMcpError(
+          'Connected to CodeWebChat, but did not receive client-id-assignment.',
+          'CWC_NO_CLIENT_ID'
+        )
       }
       await sleep(50)
     }
@@ -404,11 +475,21 @@ import {
   type CwcInboundMessage,
   type InitializeChatMessage
 } from './protocol.js'
-import { type BridgeStatus, type CwcTransport, type SendContext, sleep } from './transport.js'
+import {
+  type BridgeStatus,
+  type CwcTransport,
+  type SendContext,
+  sleep
+} from './transport.js'
 
 const HOST_CLIENT_ID = 1 // single synthetic editor identity for this process
 
-type BrowserClient = { ws: WebSocket; id: number; version: string; user_agent: string }
+type BrowserClient = {
+  ws: WebSocket
+  id: number
+  version: string
+  user_agent: string
+}
 type HostOptions = { port?: number; host?: string }
 
 export class HostTransport implements CwcTransport {
@@ -429,14 +510,18 @@ export class HostTransport implements CwcTransport {
     this.host = opts.host ?? '127.0.0.1'
   }
 
-  onApplyResponse(h: (m: ApplyChatResponseMessage) => void) { this.apply_handler = h }
-  onClose(h: (e: CwcMcpError) => void) { this.close_handler = h }
+  onApplyResponse(h: (m: ApplyChatResponseMessage) => void) {
+    this.apply_handler = h
+  }
+  onClose(h: (e: CwcMcpError) => void) {
+    this.close_handler = h
+  }
 
   status(): BridgeStatus {
     return {
       mode: this.mode,
       hosting: this.listening,
-      websocket_connected: this.listening,        // for parity with client status
+      websocket_connected: this.listening, // for parity with client status
       client_id: this.listening ? HOST_CLIENT_ID : null,
       browser_connected: this.browsers.size > 0,
       connected_browser_count: this.browsers.size
@@ -460,11 +545,16 @@ export class HostTransport implements CwcTransport {
 
   sendInitializeChat(message: InitializeChatMessage): void {
     if (this.browsers.size === 0) {
-      throw new CwcMcpError('No browser connected to receive the prompt.', 'CWC_NO_BROWSER')
+      throw new CwcMcpError(
+        'No browser connected to receive the prompt.',
+        'CWC_NO_BROWSER'
+      )
     }
     const payload = JSON.stringify(message)
     const targets = message.target_browser_id
-      ? [this.browsers.get(message.target_browser_id)].filter(Boolean) as BrowserClient[]
+      ? ([this.browsers.get(message.target_browser_id)].filter(
+          Boolean
+        ) as BrowserClient[])
       : [...this.browsers.values()]
     for (const b of targets) b.ws.send(payload)
   }
@@ -483,21 +573,31 @@ export class HostTransport implements CwcTransport {
     return new Promise<void>((resolve, reject) => {
       const server = http.createServer((req, res) => {
         res.setHeader('Access-Control-Allow-Origin', '*')
-        if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return }
+        if (req.method === 'OPTIONS') {
+          res.writeHead(204)
+          res.end()
+          return
+        }
         if (req.url === '/health') {
           res.writeHead(200, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ status: 'ok' })); return
+          res.end(JSON.stringify({ status: 'ok' }))
+          return
         }
-        res.writeHead(404); res.end()
+        res.writeHead(404)
+        res.end()
       })
 
       server.on('error', (err: NodeJS.ErrnoException) => {
         if (err.code === 'EADDRINUSE') {
-          reject(new CwcMcpError(
-            `Port ${this.port} is already in use. Close the CodeWebChat VS Code extension (it hosts this port), or run in client mode.`,
-            'CWC_PORT_IN_USE'
-          ))
-        } else { reject(err) }
+          reject(
+            new CwcMcpError(
+              `Port ${this.port} is already in use. Close the CodeWebChat VS Code extension (it hosts this port), or run in client mode.`,
+              'CWC_PORT_IN_USE'
+            )
+          )
+        } else {
+          reject(err)
+        }
       })
 
       const wss = new WebSocketServer({ server })
@@ -518,11 +618,13 @@ export class HostTransport implements CwcTransport {
     const token = url.searchParams.get('token')
     // Minimum host: accept only the browser role. (Optionally also accept VSCODE.)
     if (token !== SECURITY_TOKENS.BROWSERS) {
-      ws.close(1008, 'Invalid security token'); return
+      ws.close(1008, 'Invalid security token')
+      return
     }
     const id = ++this.browser_counter
     const client: BrowserClient = {
-      ws, id,
+      ws,
+      id,
       version: url.searchParams.get('version') ?? 'unknown',
       user_agent: url.searchParams.get('user_agent') ?? 'unknown'
     }
@@ -534,18 +636,23 @@ export class HostTransport implements CwcTransport {
       this.browsers.delete(id)
       if (this.browsers.size === 0) {
         // A browser drop mid-request must abort the in-flight prompt fast.
-        this.close_handler(new CwcMcpError(
-          'The CodeWebChat browser disconnected while waiting for Apply Response. Retry the tool call.',
-          'CWC_BROWSER_GONE'
-        ))
+        this.close_handler(
+          new CwcMcpError(
+            'The CodeWebChat browser disconnected while waiting for Apply Response. Retry the tool call.',
+            'CWC_BROWSER_GONE'
+          )
+        )
       }
     })
   }
 
   private handleMessage(raw: string): void {
     let message: CwcInboundMessage
-    try { message = JSON.parse(raw) as CwcInboundMessage }
-    catch { return } // ignore non-JSON noise from the browser
+    try {
+      message = JSON.parse(raw) as CwcInboundMessage
+    } catch {
+      return
+    } // ignore non-JSON noise from the browser
     if (message.action === 'apply-chat-response') {
       this.apply_handler(message as ApplyChatResponseMessage)
     }
@@ -616,13 +723,24 @@ const server = new McpServer(
 
 server.registerTool(
   'cwc_status',
-  { title: 'CodeWebChat Status', description: 'Report mode (host/client), server/browser connection state.', inputSchema: {} },
+  {
+    title: 'CodeWebChat Status',
+    description: 'Report mode (host/client), server/browser connection state.',
+    inputSchema: {}
+  },
   async () => {
     try {
       await transport.ensureReady(3000)
-      return { content: [{ type: 'text', text: JSON.stringify(runner.status(), null, 2) }] }
+      return {
+        content: [
+          { type: 'text', text: JSON.stringify(runner.status(), null, 2) }
+        ]
+      }
     } catch (error) {
-      return { isError: true, content: [{ type: 'text', text: toErrorText(error) }] }
+      return {
+        isError: true,
+        content: [{ type: 'text', text: toErrorText(error) }]
+      }
     }
   }
 )
@@ -631,7 +749,8 @@ server.registerTool(
   'send_to_codewebchat',
   {
     title: 'Send Prompt To CodeWebChat',
-    description: 'Send a prompt to a CodeWebChat-supported chatbot and return the reply after the user clicks Apply Response.',
+    description:
+      'Send a prompt to a CodeWebChat-supported chatbot and return the reply after the user clicks Apply Response.',
     inputSchema: {
       url: z.string().url(),
       text: z.string().min(1),
@@ -648,7 +767,10 @@ server.registerTool(
       const response = await runner.send(input)
       return { content: [{ type: 'text', text: response }] }
     } catch (error) {
-      return { isError: true, content: [{ type: 'text', text: toErrorText(error) }] }
+      return {
+        isError: true,
+        content: [{ type: 'text', text: toErrorText(error) }]
+      }
     }
   }
 )
@@ -675,7 +797,10 @@ import { HostTransport } from '../src/host-transport.js'
 import { PromptRunner } from '../src/prompt-runner.js'
 import { SECURITY_TOKENS } from '../src/protocol.js'
 
-const fakeClipboard = (seq: string[]) => { let i = 0; return async () => seq[Math.min(i++, seq.length - 1)] }
+const fakeClipboard = (seq: string[]) => {
+  let i = 0
+  return async () => seq[Math.min(i++, seq.length - 1)]
+}
 
 test('host mode: prompt reaches fake browser, apply resolves with clipboard text', async () => {
   const port = 0 // OS-assigned ephemeral port

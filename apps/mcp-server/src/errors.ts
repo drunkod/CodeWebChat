@@ -10,6 +10,8 @@ export class CwcMcpError extends Error {
       | 'CWC_CLIPBOARD_UNCHANGED'
       | 'CWC_BAD_MESSAGE'
       | 'CWC_DISCONNECTED'
+      | 'CWC_UNKNOWN_TICKET'
+      | 'CWC_BUSY'
   ) {
     super(message)
     this.name = 'CwcMcpError'
