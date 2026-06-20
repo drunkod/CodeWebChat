@@ -20,11 +20,6 @@ type ClientTransportOptions = {
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms))
 
-/**
- * Mode A transport: connects to the CodeWebChat WebSocket server (hosted by the
- * VS Code editor extension) as a vscode-role client. Pure transport — no
- * clipboard, no request tracking (that is RequestRegistry's job).
- */
 export class ClientTransport implements CwcTransport {
   public readonly mode = 'client' as const
 
@@ -121,8 +116,7 @@ export class ClientTransport implements CwcTransport {
         this.connected_browser_count = 0
         this.close_handler(
           new CwcMcpError(
-            'CodeWebChat WebSocket closed while waiting for Apply Response. ' +
-              'The VS Code extension may have restarted. Retry the tool call.',
+            'CodeWebChat WebSocket closed while waiting for Apply Response. The VS Code extension may have restarted. Retry the tool call.',
             'CWC_DISCONNECTED'
           )
         )
@@ -171,7 +165,7 @@ export class ClientTransport implements CwcTransport {
     try {
       message = JSON.parse(raw) as CwcInboundMessage
     } catch {
-      return // ignore non-JSON noise
+      return
     }
 
     if (message.action === 'client-id-assignment') {

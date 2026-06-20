@@ -5,12 +5,24 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
 import { readSystemClipboard } from './clipboard.js'
 import { ClientTransport } from './client-transport.js'
+import { HostTransport } from './host-transport.js'
 import { RequestRegistry } from './request-registry.js'
 import { toErrorText } from './errors.js'
 import { CWC_MCP_INSTRUCTIONS } from './instructions.js'
 
-const cwcTransport = new ClientTransport()
+const args = process.argv.slice(2)
+const modeArgIndex = args.findIndex((arg) => arg === '--mode')
+const mode = modeArgIndex >= 0 ? args[modeArgIndex + 1] : 'client'
+
+const cwcTransport =
+  mode === 'host' ? new HostTransport() : new ClientTransport()
 const registry = new RequestRegistry(cwcTransport, readSystemClipboard)
+
+const instructions = `${CWC_MCP_INSTRUCTIONS} Operating mode: ${cwcTransport.mode}. ${
+  cwcTransport.mode === 'host'
+    ? 'This server hosts the relay on port 55155 and expects browser clients to connect directly.'
+    : 'This server connects to the existing CodeWebChat VS Code relay.'
+}`
 
 const server = new McpServer(
   {
@@ -18,7 +30,7 @@ const server = new McpServer(
     version: '0.1.0'
   },
   {
-    instructions: CWC_MCP_INSTRUCTIONS
+    instructions
   }
 )
 
@@ -56,98 +68,25 @@ server.registerTool(
 )
 
 const sendInputSchema = {
-  url: z
-    .string()
-    .url()
-    .describe(
-      'Target chatbot URL, such as https://claude.ai/new or https://chatgpt.com/.'
-    ),
+  url: z.string().url().describe('Target chatbot URL.'),
   text: z
     .string()
     .min(1)
     .describe('Prompt and code context to send to the chatbot.'),
-  model: z
-    .string()
-    .optional()
-    .describe(
-      'Optional chatbot model name, if the selected CodeWebChat integration supports it.'
-    ),
-  target_browser_id: z
-    .number()
-    .int()
-    .positive()
-    .optional()
-    .describe(
-      'Optional browser client ID when multiple browsers are connected.'
-    ),
-  temperature: z
-    .number()
-    .min(0)
-    .max(2)
-    .optional()
-    .describe('Optional sampling temperature.'),
-  thinking_budget: z
-    .number()
-    .int()
-    .positive()
-    .optional()
-    .describe('Optional Claude thinking budget.'),
-  reasoning_effort: z
-    .string()
-    .optional()
-    .describe('Optional reasoning effort string for supported models.'),
-  top_p: z
-    .number()
-    .min(0)
-    .max(1)
-    .optional()
-    .describe('Optional nucleus sampling value.'),
-  system_instructions: z
-    .string()
-    .optional()
-    .describe(
-      'Optional system instructions if supported by the chatbot integration.'
-    ),
-  options: z
-    .array(z.string())
-    .optional()
-    .describe('Optional chatbot-specific option flags.'),
-  raw_instructions: z
-    .string()
-    .optional()
-    .describe(
-      'Original user instructions to preserve for CodeWebChat history/apply context.'
-    ),
-  edit_format: z
-    .string()
-    .optional()
-    .describe(
-      'Optional edit format metadata to preserve through Apply Response.'
-    ),
-  prompt_type: z
-    .string()
-    .optional()
-    .describe('Optional CodeWebChat prompt type value.'),
-  reuse_last_tab: z
-    .boolean()
-    .optional()
-    .describe(
-      'Reuse the last chatbot tab only when CodeWebChat reports that the previous response finished.'
-    ),
-  invocation_count: z
-    .number()
-    .int()
-    .positive()
-    .max(10)
-    .optional()
-    .describe('Open multiple chatbot invocations for the same prompt.'),
-  timeout_ms: z
-    .number()
-    .int()
-    .positive()
-    .max(900000)
-    .optional()
-    .describe('How long to wait for Apply Response. Default is 300000ms.')
+  model: z.string().optional(),
+  target_browser_id: z.number().int().positive().optional(),
+  temperature: z.number().min(0).max(2).optional(),
+  thinking_budget: z.number().int().positive().optional(),
+  reasoning_effort: z.string().optional(),
+  top_p: z.number().min(0).max(1).optional(),
+  system_instructions: z.string().optional(),
+  options: z.array(z.string()).optional(),
+  raw_instructions: z.string().optional(),
+  edit_format: z.string().optional(),
+  prompt_type: z.string().optional(),
+  reuse_last_tab: z.boolean().optional(),
+  invocation_count: z.number().int().positive().max(10).optional(),
+  timeout_ms: z.number().int().positive().max(900000).optional()
 }
 
 server.registerTool(
@@ -208,7 +147,7 @@ server.registerTool(
         .positive()
         .max(30000)
         .optional()
-        .describe('Max time to wait this call (default 10000, cap 30000).')
+        .describe('Max time to wait this call.')
     }
   },
   async ({ ticket, wait_ms }) => {
@@ -236,5 +175,5 @@ server.registerTool(
   }
 )
 
-const transport = new StdioServerTransport()
-await server.connect(transport)
+const stdio = new StdioServerTransport()
+await server.connect(stdio)

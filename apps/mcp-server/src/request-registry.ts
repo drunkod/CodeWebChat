@@ -28,13 +28,6 @@ type RequestRecord = {
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms))
 
-/**
- * Owns the request lifecycle over any CwcTransport:
- * - begin() fires a prompt and returns a ticket immediately,
- * - poll() returns the reply when ready or 'pending' after a short capped wait.
- * The clipboard before/after guard and apply-response waiting live here, so the
- * transport stays a pure transport.
- */
 export class RequestRegistry {
   private readonly requests = new Map<string, RequestRecord>()
   private active_request: Promise<unknown> = Promise.resolve()
@@ -63,11 +56,6 @@ export class RequestRegistry {
     })
   }
 
-  public status() {
-    return this.transport.status()
-  }
-
-  /** Fire a prompt and return a ticket immediately. Does NOT wait for Apply. */
   public begin(input: SendPromptInput): { ticket: string } {
     const ticket = randomUUID()
     const promise = this.serializedRun(input)
@@ -86,7 +74,6 @@ export class RequestRegistry {
     return { ticket }
   }
 
-  /** Return the reply if ready, else 'pending' after a short capped wait. */
   public async poll(ticket: string, wait_ms?: number): Promise<PollResult> {
     const record = this.requests.get(ticket)
     if (!record) {
@@ -128,7 +115,6 @@ export class RequestRegistry {
     }
   }
 
-  /** Serialize runs: one initialize-chat in flight at a time (client_id-only correlation). */
   private serializedRun(input: SendPromptInput): Promise<string> {
     const previous = this.active_request
     let release!: () => void
@@ -158,6 +144,7 @@ export class RequestRegistry {
 
     const before_clipboard = await this.read_clipboard()
     const timeout_ms = input.timeout_ms ?? 300000
+    const apply_promise = this.waitForApply(client_id, timeout_ms)
 
     const message: InitializeChatMessage = {
       action: 'initialize-chat',
@@ -179,10 +166,8 @@ export class RequestRegistry {
       invocation_count: input.invocation_count
     }
 
-    const apply_promise = this.waitForApply(client_id, timeout_ms)
     this.transport.sendInitializeChat(message)
     await apply_promise
-
     await sleep(this.clipboard_read_delay_ms)
 
     const after_clipboard = await this.read_clipboard()
@@ -219,7 +204,7 @@ export class RequestRegistry {
       this.pending_apply = {
         resolve: (message) => {
           if (message.client_id !== client_id) {
-            return // ignore stale apply for a different client_id
+            return
           }
           clearTimeout(timer)
           this.pending_apply = null

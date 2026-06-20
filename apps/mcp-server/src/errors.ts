@@ -12,6 +12,8 @@ export class CwcMcpError extends Error {
       | 'CWC_DISCONNECTED'
       | 'CWC_UNKNOWN_TICKET'
       | 'CWC_BUSY'
+      | 'CWC_PORT_IN_USE'
+      | 'CWC_BROWSER_GONE'
   ) {
     super(message)
     this.name = 'CwcMcpError'
