@@ -195,6 +195,7 @@ export class HostTransport implements CwcTransport {
           () => this.pingBrowsers(),
           PING_INTERVAL_MS
         )
+        this.ping_timer.unref?.()
         resolve()
       })
     })
