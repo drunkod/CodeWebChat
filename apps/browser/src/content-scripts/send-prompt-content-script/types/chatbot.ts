@@ -15,5 +15,6 @@ export type Chatbot = {
     edit_format?: string
     inject_button: boolean
   }) => void
+  get_latest_reply_text?: () => Promise<string>
   enter_message?: (params: { message: string }) => Promise<void>
 }

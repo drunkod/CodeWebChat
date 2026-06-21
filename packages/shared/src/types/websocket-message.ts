@@ -22,6 +22,7 @@ export type InitializeChatMessage = {
   text: string
   url: string
   client_id: number // Client ID to identify which editor sent this message
+  request_id?: string
   model?: string
   target_browser_id?: number
   temperature?: number

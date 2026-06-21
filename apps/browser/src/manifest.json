@@ -13,7 +13,21 @@
     "128": "icons/icon-128.png"
   },
   "permissions": ["storage", "alarms"],
-  "host_permissions": ["http://localhost:55155/", "ws://localhost:55155/"],
+  "host_permissions": [
+    "http://localhost:55155/",
+    "ws://localhost:55155/",
+    "http://localhost:1625/",
+    "ws://localhost:1625/"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["jazz/*"],
+      "matches": ["<all_urls>"]
+    }
+  ],
   "action": {
     "default_title": "Autofill for Code Web Chat",
     "default_popup": "popup.html"

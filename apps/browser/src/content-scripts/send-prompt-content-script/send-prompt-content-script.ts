@@ -196,6 +196,7 @@ const main = async () => {
       text: string
       current_chat: Chat
       client_id: number
+      request_id?: string
       raw_instructions?: string
       edit_format?: string
       prompt_type?:
@@ -243,6 +244,7 @@ const main = async () => {
         session_data_key,
         JSON.stringify({
           client_id: stored_data.client_id,
+          request_id: stored_data.request_id,
           raw_instructions: stored_data.raw_instructions,
           edit_format: stored_data.edit_format,
           inject_button
@@ -269,6 +271,17 @@ const main = async () => {
             edit_format: session_data.edit_format,
             inject_button: session_data.inject_button ?? true
           })
+
+          if (session_data.request_id && chatbot.get_latest_reply_text) {
+            const response_text = await chatbot.get_latest_reply_text()
+            if (response_text) {
+              await browser.runtime.sendMessage<Message>({
+                action: 'cwc-reply-text',
+                request_id: session_data.request_id,
+                response_text
+              } as Message)
+            }
+          }
         }
       } catch (e) {
         console.error('Failed to parse CWC session data', e)

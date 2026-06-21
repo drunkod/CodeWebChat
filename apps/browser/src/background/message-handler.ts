@@ -80,6 +80,7 @@ const process_next_chat = async () => {
         options: current_chat_message.options
       },
       client_id: current_chat_message.client_id,
+      request_id: current_chat_message.request_id,
       raw_instructions: current_chat_message.raw_instructions,
       prompt_type: current_chat_message.prompt_type
     }

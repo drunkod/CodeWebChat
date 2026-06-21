@@ -14,7 +14,14 @@ type FinishedRespondingMessage = {
   action: 'finished-responding'
 }
 
+type ReplyTextMessage = {
+  action: 'cwc-reply-text'
+  request_id: string
+  response_text: string
+}
+
 export type Message =
   | ChatInitializedMessage
   | ApplyChatResponseMessage
   | FinishedRespondingMessage
+  | ReplyTextMessage

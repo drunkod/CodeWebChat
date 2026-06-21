@@ -18,7 +18,15 @@ const config = (_: any, argv: Record<string, any>): webpack.Configuration => {
         { from: 'src/manifest.json', to: 'manifest.json' },
         { from: 'src/icons', to: 'icons' },
         { from: 'src/views/popup/index.html', to: 'popup.html' },
-        { from: 'src/views/popup/index.css', to: 'index.css' }
+        { from: 'src/views/popup/index.css', to: 'index.css' },
+        {
+          from: path.resolve(
+            __dirname,
+            '../../node_modules/jazz-tools/dist/jazz_wasm_bg.wasm'
+          ),
+          to: 'jazz/jazz_wasm_bg.wasm',
+          noErrorOnMissing: true
+        }
       ]
     })
   ]

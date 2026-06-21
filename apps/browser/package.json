@@ -1,7 +1,7 @@
 {
   "name": "gemini-coder-connector",
   "scripts": {
-    "build": "webpack --mode production && ts-node create-firefox-build.ts && ts-node create-zip-archives.ts",
+    "build": "pnpm --filter shared build && webpack --mode production && ts-node create-firefox-build.ts && ts-node create-zip-archives.ts",
     "lint": "eslint src --ext ts,tsx",
     "lint:fix": "eslint src --ext ts,tsx --fix"
   },
@@ -42,6 +42,7 @@
     "@types/webextension-polyfill": "^0.12.4",
     "@vscode/codicons": "^0.0.40",
     "classnames": "^2.5.1",
+    "jazz-tools": "alpha",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "tsconfig-paths-webpack-plugin": "^4.2.0"
