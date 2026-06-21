@@ -60,12 +60,16 @@ async function loadSharedJazzPermissions(): Promise<any> {
   return mod.default
 }
 
+// This test is opt-in because the published jazz-napi alpha.51 local server does not expose
+// the HTTP schema-admin endpoint used by pushSchemaCatalogue. Without schema publication,
+// cross-peer table subscriptions do not route rows between peers.
+// Re-enable in CI once a Jazz runtime with /apps/{appId}/admin/schemas is available.
 test(
   'two peers exchange request/response rows over the local server',
   {
     skip: RUN_ROUNDTRIP
       ? false
-      : 'set CWC_RUN_JAZZ_ROUNDTRIP=1 to run — NOTE: requires jazz-napi with HTTP admin endpoint (not in alpha.51 published binary; schema publishing via pushSchemaCatalogue 404s)'
+      : 'set CWC_RUN_JAZZ_ROUNDTRIP=1 to run real Jazz integration test'
   },
   async (t) => {
     t.signal?.throwIfAborted?.()
@@ -157,13 +161,17 @@ test(
             : (deltaLike.delta ?? [])
           for (const change of changes) {
             if (change.item.status !== 'pending') continue
-            dbB.insert(app.chat_responses, {
-              request_id: change.item.request_id,
-              response_text: `echo:${change.item.text}`,
-              status: 'done',
-              error: null,
-              created_at: Date.now()
-            })
+            // Confirm the reply reached the edge (sync server) so peer A can see
+            // it — not just the local tier. See durability-tiers in Jazz docs.
+            await dbB
+              .insert(app.chat_responses, {
+                request_id: change.item.request_id,
+                response_text: `echo:${change.item.text}`,
+                status: 'done',
+                error: null,
+                created_at: Date.now()
+              })
+              .wait({ tier: 'edge' })
           }
         }
       )
@@ -191,15 +199,18 @@ test(
           ? maybeUnsubResponses
           : await maybeUnsubResponses
 
-      // Peer A: insert the request
-      dbA.insert(app.chat_requests, {
-        request_id: 'req-rt-1',
-        url: 'https://x',
-        text: 'hello',
-        prompt_type: 'edit-context',
-        status: 'pending',
-        created_at: Date.now()
-      })
+      // Peer A: insert the request and confirm it reached the edge so peer B's
+      // subscription is guaranteed to receive it.
+      await dbA
+        .insert(app.chat_requests, {
+          request_id: 'req-rt-1',
+          url: 'https://x',
+          text: 'hello',
+          prompt_type: 'edit-context',
+          status: 'pending',
+          created_at: Date.now()
+        })
+        .wait({ tier: 'edge' })
 
       await withTimeout('waitFor received', waitFor(() => received !== null))
       assert.equal(received, 'echo:hello')

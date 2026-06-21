@@ -67,7 +67,7 @@ export async function startJazzClient(opts: {
     secret: settings.secret,
     driver: { type: 'memory' },
     runtimeSources: {
-      wasmUrl: chrome.runtime.getURL('jazz/jazz_wasm_bg.wasm')
+      wasmUrl: chrome.runtime.getURL('1146eb6d15fb5f66424a.wasm')
     }
   })) as unknown as JazzDb
 

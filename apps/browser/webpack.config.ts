@@ -21,10 +21,13 @@ const config = (_: any, argv: Record<string, any>): webpack.Configuration => {
         { from: 'src/views/popup/index.css', to: 'index.css' },
         {
           from: path.resolve(
-            __dirname,
-            '../../node_modules/jazz-tools/dist/jazz_wasm_bg.wasm'
+            path.dirname(require.resolve('jazz-tools/package.json')),
+            '../jazz-wasm/pkg/jazz_wasm_bg.wasm'
           ),
-          to: 'jazz/jazz_wasm_bg.wasm'
+          to: 'jazz/jazz_wasm_bg.wasm',
+          noErrorOnMissing: false,
+          force: true,
+          info: { minimized: true }
         }
       ]
     })

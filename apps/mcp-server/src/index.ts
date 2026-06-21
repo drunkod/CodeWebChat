@@ -22,7 +22,8 @@ import { JazzTransport } from './jazz-transport.js'
 
 const args = process.argv.slice(2)
 const modeArgIndex = args.findIndex((arg) => arg === '--mode')
-const mode = modeArgIndex >= 0 ? args[modeArgIndex + 1] : 'client'
+const mode =
+  modeArgIndex >= 0 ? args[modeArgIndex + 1] : (process.env.CWC_MODE ?? 'client')
 const transportKind = parseTransportKind(args)
 
 let cwcTransport

@@ -56,18 +56,32 @@ export async function startSyncServer(
   }
 }
 
-export async function pushSchema(config: JazzConfig, serverUrl: string): Promise<void> {
+export async function pushSchema(
+  config: JazzConfig,
+  serverUrl: string
+): Promise<void> {
   const { pushSchemaCatalogue } = await loadJazzDev()
   const schemaDir = new URL(
     '../../../packages/shared/src/jazz',
     import.meta.url
   ).pathname
-  await pushSchemaCatalogue({
-    appId: config.appId,
-    serverUrl,
-    adminSecret: config.adminSecret ?? 'cwc-default-admin-secret',
-    schemaDir
-  })
+  try {
+    await pushSchemaCatalogue({
+      appId: config.appId,
+      serverUrl,
+      adminSecret: config.adminSecret ?? 'cwc-default-admin-secret',
+      schemaDir
+    })
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
+    if (/Schema publish failed:\s*404\s+Not Found/i.test(msg)) {
+      console.warn(
+        `[cwc-mcp-server] Jazz schema admin endpoint is unavailable on this local server (${serverUrl}). Continuing without schema publication; cross-peer sync may not work until Jazz exposes /apps/{appId}/admin/schemas.`
+      )
+      return
+    }
+    throw error
+  }
 }
 
 export async function startSyncServerSafe(
