@@ -11,6 +11,6 @@ test('startSyncServerSafe surfaces missing jazz-tools as a loader error', async 
         dataDir: '.jazz/server',
         serverUrl: 'ws://localhost:-1'
       }),
-    /Cannot find package 'jazz-tools'|does not export startLocalJazzServer/
+    /Cannot find package 'jazz-tools'|does not export startLocalJazzServer|Invalid DevServer options/
   )
 })

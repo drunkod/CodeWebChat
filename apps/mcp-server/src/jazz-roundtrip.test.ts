@@ -27,7 +27,10 @@ async function withTimeout<T>(
   }
 }
 
-async function waitFor(cond: () => boolean, timeout = TEST_TIMEOUT_MS): Promise<void> {
+async function waitFor(
+  cond: () => boolean,
+  timeout = TEST_TIMEOUT_MS
+): Promise<void> {
   const start = Date.now()
   while (!cond()) {
     if (Date.now() - start > timeout) throw new Error('waitFor timed out')
@@ -54,7 +57,10 @@ test(
   async (t) => {
     t.signal?.throwIfAborted?.()
 
-    const app = await withTimeout('import shared Jazz schema', loadSharedJazzApp())
+    const app = await withTimeout(
+      'import shared Jazz schema',
+      loadSharedJazzApp()
+    )
 
     const { startLocalJazzServer } = await withTimeout(
       'import jazz-tools/dev',
@@ -85,13 +91,25 @@ test(
       const [{ createJazzContext }, { createDb }] = await withTimeout(
         'import Jazz APIs',
         Promise.all([
-          import('jazz-tools/backend') as Promise<{
-            createJazzContext: (opts: Record<string, unknown>) => {
+          import('jazz-tools/backend') as unknown as Promise<{
+            createJazzContext: (opts: {
+              appId: string
+              app: unknown
+              permissions: Record<string, unknown>
+              serverUrl: string
+              allowLocalFirstAuth: boolean
+              driver: { type: 'memory' }
+            }) => {
               asBackend: () => any
             }
           }>,
-          import('jazz-tools') as Promise<{
-            createDb: (opts: Record<string, unknown>) => Promise<any>
+          import('jazz-tools') as unknown as Promise<{
+            createDb: (opts: {
+              appId: string
+              serverUrl: string
+              driver: { type: 'memory' }
+              secret: string
+            }) => Promise<any>
           }>
         ])
       )
@@ -164,7 +182,9 @@ test(
     } finally {
       unsubResponses?.()
       unsubRequests?.()
-      await withTimeout('server.stop', server.stop(), 1000).catch(() => undefined)
+      await withTimeout('server.stop', server.stop(), 1000).catch(
+        () => undefined
+      )
     }
   }
 )
