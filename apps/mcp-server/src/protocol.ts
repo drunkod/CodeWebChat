@@ -33,6 +33,7 @@ export type ApplyChatResponseMessage = {
   raw_instructions?: string
   edit_format?: string
   url?: string
+  response_text?: string
 }
 
 export type ClientIdAssignmentMessage = {

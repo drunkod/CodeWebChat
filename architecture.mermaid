@@ -1,0 +1,113 @@
+graph TB
+    subgraph Monorepo["CodeWebChat Monorepo (pnpm workspace)"]
+
+        subgraph Editor["apps/editor — VS Code Extension"]
+            EXT_ACTIVATE["Extension Entry\nextension.ts"]
+
+            subgraph EditorCommands["commands/"]
+                CMD_APPLY["apply-chat-response"]
+                CMD_CONTEXT["apply-context"]
+                CMD_COMMIT["generate-commit-message"]
+                CMD_FILES["find-relevant-files"]
+                CMD_CURSOR["code-at-cursor"]
+            end
+
+            subgraph EditorServices["services/"]
+                WS_MGR["WebSocketManager\nBridges VS Code ↔ WS server"]
+                WS_PROC["WebSocketServerProcess\nSpawns ws server subprocess"]
+                API_MGR["ApiManager"]
+                MODEL_MGR["ModelProvidersManager"]
+                MODEL_FETCH["ModelFetcher"]
+            end
+
+            subgraph EditorContext["context/providers/"]
+                CTX_EDITOR["editor provider"]
+                CTX_OPEN["open-editors provider"]
+                CTX_WORKSPACE["workspace provider"]
+            end
+
+            subgraph PanelView["views/panel/"]
+                subgraph PanelBackend["backend/"]
+                    MSG_HANDLERS["message-handlers/\n(70+ handlers: send, apply,\nhistory, settings, tasks…)"]
+                end
+                subgraph PanelFrontend["frontend/ (React Webview)"]
+                    UI_HOME["Home view"]
+                    UI_MAIN["Main chat view"]
+                    UI_COMPS["components/"]
+                    UI_HOOKS["hooks/"]
+                    UI_CTX["contexts/"]
+                end
+            end
+
+            subgraph SettingsView["views/settings/"]
+                SETTINGS_UI["Settings Webview (React)"]
+            end
+        end
+
+        subgraph Browser["apps/browser — Browser Extension"]
+            BG["background/\nmain.ts · websocket.ts\nkeep-alive · message-handler"]
+            CS["content-scripts/\nsend-prompt-content-script"]
+            POPUP["views/popup/\nPopup UI (React)"]
+        end
+
+        subgraph Web["apps/web"]
+            WEB_APP["Web App"]
+        end
+
+        subgraph Packages["packages/"]
+            SHARED["shared/\nconstants · types · hooks · utils\n(WebSocketMessage, Chatbots, etc.)"]
+            UI_PKG["ui/\nShared React components\n+ Storybook"]
+        end
+
+    end
+
+    subgraph External["External / Runtime"]
+        WS_SERVER["WebSocket Server\n(subprocess: ws)"]
+        CHATBOT["Browser Chatbot\n(Claude, ChatGPT, etc.)"]
+        VSCODE_API["VS Code API"]
+        LLM_API["LLM APIs\n(Anthropic, OpenAI…)"]
+    end
+
+    subgraph AiTools["ai-tools/skills (Cowork / Claude Code skills)"]
+        SKILL_MCP["mcp-builder\nMCPConnection · evaluation harness"]
+        SKILL_DOCX["docx\nDocument / XMLEditor"]
+        SKILL_PPTX["pptx"]
+        SKILL_SEC["security-toolkit"]
+        SKILL_GAME["develop-web-game"]
+    end
+
+    %% Core data flow
+    EXT_ACTIVATE --> WS_MGR
+    EXT_ACTIVATE --> WS_PROC
+    WS_PROC -- "spawns" --> WS_SERVER
+    WS_MGR -- "WebSocket client" --> WS_SERVER
+    BG -- "WebSocket client" --> WS_SERVER
+    WS_SERVER -- "routes messages" --> WS_MGR
+    WS_SERVER -- "routes messages" --> BG
+
+    %% Panel communication
+    PanelFrontend -- "postMessage" --> MSG_HANDLERS
+    MSG_HANDLERS -- "postMessage" --> PanelFrontend
+    MSG_HANDLERS --> WS_MGR
+    MSG_HANDLERS --> EditorContext
+    MSG_HANDLERS --> EditorServices
+
+    %% Browser extension flow
+    CS -- "inject prompt" --> CHATBOT
+    POPUP --> BG
+    BG -- "send-prompt message" --> WS_SERVER
+
+    %% Shared packages
+    Editor --> SHARED
+    Browser --> SHARED
+    Web --> SHARED
+    PanelFrontend --> UI_PKG
+    SETTINGS_UI --> UI_PKG
+
+    %% External
+    WS_MGR --> VSCODE_API
+    EditorCommands --> VSCODE_API
+    API_MGR --> LLM_API
+
+    %% MCP plan (future)
+    WS_SERVER -. "planned MCP server\n(plans/mcp-server-prototype-plan)" .-> SKILL_MCP

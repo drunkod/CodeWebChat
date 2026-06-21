@@ -16,6 +16,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.0",
     "clipboardy": "^4.0.0",
+    "jazz-tools": "alpha",
     "ws": "^8.18.0",
     "zod": "^3.25.0"
   },
