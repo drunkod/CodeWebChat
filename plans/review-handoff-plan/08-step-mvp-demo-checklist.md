@@ -19,6 +19,45 @@ Goal: confirm the ChatGPT review is actually good before wiring anything.
 If the review is weak, tune the **reviewer system prompt** and **handoff prompt**
 (`prompts/`) before continuing — cheaper now than after automation.
 
+## 8.1b — ⚠️ Is the reviewer actually GROUNDED? (run every time)
+
+The transport can succeed while the review is **worthless** — if the ChatGPT page
+can't see the commit, it will "review" by guessing from the commit title and file
+names. A guessed review reads plausibly but is hedged and generic. Catch it:
+
+**Preconditions (before sending):**
+
+```text
+[ ] The branch/commit is PUSHED to GitHub:  git push -u origin <draft_branch>
+    (you've been committing locally with --no-verify — push, or the reviewer
+     has nothing to fetch.)
+[ ] packet.json commit_sha is the REMOTE head (run build-packet.sh WITHOUT
+    CWC_NO_PUSH=1, so it pushes and reads origin/<branch>).
+[ ] The `url` you send to is the GitHub-CONNECTED ChatGPT project — not a plain
+    chatgpt.com/ chat. Open it and confirm the repo connector is attached.
+```
+
+**Grounding test (on the returned review) — RED FLAGS that mean "not grounded":**
+
+```text
+[ ] The reply does NOT start with disclaimers like "I can't directly fetch the
+    diff" / "based on the commit intent" / "this pattern typically".
+[ ] Findings cite REAL code: concrete identifiers, line-ish references, exact
+    symbols actually in the changed files (e.g. `server.listen(this.port)`,
+    `sendInitializeChat broadcasts`) — not hedged "likely/probably/if it assumes".
+[ ] Paths in findings match the ACTUAL changed_files in packet.json.
+[ ] At least one finding could only be known by reading the file, not the title.
+```
+
+If any RED FLAG trips: the reviewer is guessing. **Fix the preconditions
+(push + connected project URL) and re-run — do not act on a guessed review.**
+
+> Worked example: a grounded review of the host transport cited the real
+> `server.listen(this.port)` loopback bug and the `sendInitializeChat` broadcast.
+> A non-grounded run of the _same commit_ opened with "I can't directly fetch the
+> exact diff" and produced only hedged, generic "likely coupled" findings. Same
+> transport, totally different value — grounding is the difference.
+
 ## 8.2 Full MVP flow (the demo)
 
 ```text
@@ -29,6 +68,7 @@ If the review is weak, tune the **reviewer system prompt** and **handoff prompt*
 [ ] Step 4: send_to_codewebchat(url=ChatGPT project, text=prompt, prompt_type=edit-context) → ticket.
 [ ] Click CodeWebChat Apply Response in the ChatGPT tab.
 [ ] Step 4: poll_cwc_response → status:done with the review.
+[ ] **8.1b grounding check: the review cites real code, not "I can't fetch the diff" / hedged guesses.**
 [ ] Step 5: parse-review.mjs → review.json (verdict/findings/tests/patch_plan).
 [ ] Step 5: run the feedback-back prompt in Zed; apply fixes.
 [ ] Step 6: commit again, run check-sha.sh → drift warning appears.
@@ -45,6 +85,8 @@ If the review is weak, tune the **reviewer system prompt** and **handoff prompt*
   (prose + JSON). ✅
 - A commit-SHA match check warns on drift. ✅
 - On transport failure, a copyable fallback payload is shown. ✅
+- **The review is grounded** — it cites real code from the pushed commit, not
+  guesses (8.1b). _Transport success ≠ useful review._ ✅
 
 ## 8.4 What "done" unlocks
 

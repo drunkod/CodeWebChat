@@ -39,14 +39,20 @@ else
   CHANGED="$(git diff --name-only "${COMMIT_SHA}~1" "${COMMIT_SHA}" 2>/dev/null || true)"
 fi
 FILES_JSON="$(printf '%s\n' "$CHANGED" \
-  | python3 -c 'import json,sys; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))')"
+  | node -e 'const fs=require("fs"); const lines=fs.readFileSync(0,"utf8").split(/\r?\n/).map((line)=>line.trim()).filter(Boolean); process.stdout.write(JSON.stringify(lines));')"
 
-python3 - "$REPO_NAME" "$BASE_BRANCH" "$DRAFT_BRANCH" "$COMMIT_SHA" \
-            "$COMMIT_TITLE" "$SUMMARY" "$REVIEW_FOCUS" "$FILES_JSON" <<'PY'
-import json, sys
-keys = ["repo_name","base_branch","draft_branch","commit_sha",
-        "commit_title","change_summary","review_focus"]
-packet = dict(zip(keys, sys.argv[1:8]))
-packet["changed_files"] = json.loads(sys.argv[8])
-print(json.dumps(packet, indent=2))
-PY
+node - "$REPO_NAME" "$BASE_BRANCH" "$DRAFT_BRANCH" "$COMMIT_SHA" \
+        "$COMMIT_TITLE" "$SUMMARY" "$REVIEW_FOCUS" "$FILES_JSON" <<'NODE'
+const keys = [
+  'repo_name',
+  'base_branch',
+  'draft_branch',
+  'commit_sha',
+  'commit_title',
+  'change_summary',
+  'review_focus'
+]
+const packet = Object.fromEntries(keys.map((key, index) => [key, process.argv[index + 2]]))
+packet.changed_files = JSON.parse(process.argv[9])
+process.stdout.write(JSON.stringify(packet, null, 2))
+NODE
