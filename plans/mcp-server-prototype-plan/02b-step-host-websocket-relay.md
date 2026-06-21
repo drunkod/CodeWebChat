@@ -3,7 +3,7 @@
 **Prerequisite:** the Phase A demo (Step 4) passes with VS Code running. Don't
 start this until then.
 
-**Goal:** make the MCP server *host* the WebSocket server on `localhost:55155`
+**Goal:** make the MCP server _host_ the WebSocket server on `localhost:55155`
 itself, so the **browser extension connects directly to it** and **VS Code is not
 needed at all**. This is the step that turns "an extra editor client" into "a
 replacement for the editor extension."
@@ -46,18 +46,18 @@ browser connects to you.
 
 ## What to keep vs. drop (minimum host)
 
-In pure host mode **the MCP server *is* the editor**, so you can drop the parts of
-the relay that exist only to serve *other* editor clients.
+In pure host mode **the MCP server _is_ the editor**, so you can drop the parts of
+the relay that exist only to serve _other_ editor clients.
 
-| Relay capability | Keep in MCP host? | Why |
-| --- | --- | --- |
-| HTTP server + `GET /health` | **Keep** | Browser polls `/health` to detect a live server before connecting. |
-| Token validation | **Keep** | Reject anything that isn't `gemini-coder` (browser). You may also accept `gemini-coder-vscode` if you want real VS Code to still attach — optional. |
-| Browser client registry (id, version, user_agent) | **Keep** | You need to target a browser and report status. |
-| `connected` message + browser-connection-status notify | **Keep (simplify)** | Drives your `cwc_status`. You can notify *yourself* internally instead of broadcasting to editor clients. |
-| `client-id-assignment` to editor clients | **Drop** | There is no separate editor client — you are it. |
-| Editor↔editor relay / multi-editor maps | **Drop** | Single in-process "editor." |
-| Ping/keepalive | **Keep** | Detect dead browser sockets fast. |
+| Relay capability                                       | Keep in MCP host?   | Why                                                                                                                                                 |
+| ------------------------------------------------------ | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| HTTP server + `GET /health`                            | **Keep**            | Browser polls `/health` to detect a live server before connecting.                                                                                  |
+| Token validation                                       | **Keep**            | Reject anything that isn't `gemini-coder` (browser). You may also accept `gemini-coder-vscode` if you want real VS Code to still attach — optional. |
+| Browser client registry (id, version, user_agent)      | **Keep**            | You need to target a browser and report status.                                                                                                     |
+| `connected` message + browser-connection-status notify | **Keep (simplify)** | Drives your `cwc_status`. You can notify _yourself_ internally instead of broadcasting to editor clients.                                           |
+| `client-id-assignment` to editor clients               | **Drop**            | There is no separate editor client — you are it.                                                                                                    |
+| Editor↔editor relay / multi-editor maps                | **Drop**            | Single in-process "editor."                                                                                                                         |
+| Ping/keepalive                                         | **Keep**            | Detect dead browser sockets fast.                                                                                                                   |
 
 So the minimum host = HTTP `/health` + accept browser clients + send
 `initialize-chat` to a browser + receive `apply-chat-response` + track
@@ -71,9 +71,9 @@ Your Step 2 `CwcBridge` already implements the **editor side** of the
 conversation. In host mode the only thing that changes is the **transport
 direction**:
 
-- Mode A: `CwcBridge` is a *client* — it dials the server and the relay forwards
+- Mode A: `CwcBridge` is a _client_ — it dials the server and the relay forwards
   `initialize-chat` to the browser.
-- Mode B: the MCP server *is* the server — it sends `initialize-chat` **straight
+- Mode B: the MCP server _is_ the server — it sends `initialize-chat` **straight
   to the browser socket** it accepted; the browser sends `apply-chat-response`
   **straight back** to you.
 
@@ -82,7 +82,7 @@ Everything else in Step 2 carries over unchanged:
 - per-request **serialization** (`active_request` queue),
 - the **clipboard before/after guard** (`CWC_CLIPBOARD_EMPTY` /
   `CWC_CLIPBOARD_UNCHANGED`),
-- **disconnect-while-in-flight** rejection (now: *browser* socket closes →
+- **disconnect-while-in-flight** rejection (now: _browser_ socket closes →
   reject in-flight with `CWC_DISCONNECTED`/a new `CWC_BROWSER_GONE`),
 - the `timeout_ms` → `CWC_TIMEOUT` path.
 
@@ -107,8 +107,8 @@ interface CwcTransport {
 
 1. **Port 55155 already in use** — VS Code's extension (or a stale server
    process) owns it. Detect `EADDRINUSE` on listen and return a clear error:
-   *"Port 55155 is in use — close the CodeWebChat VS Code extension, or run in
-   client mode."* Add code `CWC_PORT_IN_USE`. This is the #1 host-mode footgun
+   _"Port 55155 is in use — close the CodeWebChat VS Code extension, or run in
+   client mode."_ Add code `CWC_PORT_IN_USE`. This is the #1 host-mode footgun
    (A and B can't both bind the port).
 2. **No browser connects** — you host fine but nobody dials in. `ensureReady`
    should wait up to a timeout then fail with `CWC_NO_BROWSER`.
@@ -173,7 +173,8 @@ extension's browser-bridge role.
 ## Note on the clipboard (leads into Phase C / Step 6)
 
 Once you own the server, you control the protocol. Phase C (Step 6) adds
-`request_id` + `response_text` to `apply-chat-response` so the browser sends the
-text directly and you delete the clipboard path entirely. That change lives in
-`apps/browser` (same repo) — out of scope for this step, but host mode is the
-prerequisite that makes it clean.
+`request_id` + `response_text` to `apply-chat-response` so the browser can send the
+text directly inline. The clipboard path is **retained as a fallback** (decision: do
+NOT remove it) — inline `response_text` is preferred when present, clipboard
+otherwise. That change lives in `apps/browser` (same repo) — out of scope for this
+step, but host mode is the prerequisite that makes the inline option clean.

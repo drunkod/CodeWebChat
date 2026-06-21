@@ -6,26 +6,26 @@ cheaply**.
 
 ## The one idea
 
-Your goal is **Mode B (host mode)**: the MCP server *hosts* the WebSocket relay
+Your goal is **Mode B (host mode)**: the MCP server _hosts_ the WebSocket relay
 on `localhost:55155` so the browser extension talks to it directly, with no VS
 Code. (Why: see `09-fit-analysis-vs-goal.md`.)
 
 But **do not start by writing host mode.** Start by validating the browser
 handshake in **Mode A (client mode)**, which you've already planned (Steps 1–4).
 That proves the message shapes and the prompt→Apply→clipboard loop are correct
-against the *real, unmodified* relay before you take on owning the server. If
+against the _real, unmodified_ relay before you take on owning the server. If
 Mode A doesn't work, Mode B won't either — and Mode A is far less code to debug.
 
 ## Phases (build in this order)
 
-| Phase | What | Plan files | Needs VS Code running? | Exit criteria |
-| --- | --- | --- | --- | --- |
-| **0** | Scaffold the package | Step 1 | n/a | `dist/index.js` builds; `cwc_status` callable |
-| **A** ◀ start | Client mode end-to-end | Steps 2, 3, 4 | **Yes** | Manual demo green: prompt → browser opens → click Apply → tool returns text |
-| **B** ⭐ goal | Host mode (own the relay) | **Step 2b** (new) | **No** | Same demo passes with **VS Code closed**; browser connects to your server |
-| **C** | Kill the clipboard | Step 6 | No | `apply-chat-response` carries `response_text` + `request_id`; clipboard path removed |
-| **X** | Hardening (cross-cutting) | `08-adapt-from-repo-harness/` | — | instructions, redaction, doctor, error codes, blocking decision in place |
-| **D** | Decisions recorded | Step 7 ADR (+ ADR-005) | — | Mode A/B and blocking-call decisions written down |
+| Phase         | What                                         | Plan files                    | Needs VS Code running? | Exit criteria                                                                                        |
+| ------------- | -------------------------------------------- | ----------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------- |
+| **0**         | Scaffold the package                         | Step 1                        | n/a                    | `dist/index.js` builds; `cwc_status` callable                                                        |
+| **A** ◀ start | Client mode end-to-end                       | Steps 2, 3, 4                 | **Yes**                | Manual demo green: prompt → browser opens → click Apply → tool returns text                          |
+| **B** ⭐ goal | Host mode (own the relay)                    | **Step 2b** (new)             | **No**                 | Same demo passes with **VS Code closed**; browser connects to your server                            |
+| **C**         | Add inline reply option (clipboard retained) | Step 6                        | No                     | `apply-chat-response` _also_ carries `response_text` + `request_id`; clipboard path KEPT as fallback |
+| **X**         | Hardening (cross-cutting)                    | `08-adapt-from-repo-harness/` | —                      | instructions, redaction, doctor, error codes, blocking decision in place                             |
+| **D**         | Decisions recorded                           | Step 7 ADR (+ ADR-005)        | —                      | Mode A/B and blocking-call decisions written down                                                    |
 
 Tests (Step 5) run continuously from Phase A onward, not as a separate phase.
 
@@ -52,7 +52,7 @@ Tests (Step 5) run continuously from Phase A onward, not as a separate phase.
 - **ADR-005: Mode A vs Mode B.** Recommended: ship A as a validation harness, B
   as the deliverable. (Draft entry appended to Step 7.)
 - **Blocking-call design** (`08-adapt-from-repo-harness/07-...`). Decide
-  *block-with-timeout* vs *split send+poll* before finalizing the tool schema —
+  _block-with-timeout_ vs _split send+poll_ before finalizing the tool schema —
   it changes inputs and error codes in both modes.
 
 ## Map of all plan files
@@ -66,7 +66,7 @@ Tests (Step 5) run continuously from Phase A onward, not as a separate phase.
 - `03b-split-send-poll-reference-code.md` — **split send+poll tools, ADR-009 Option C (new)**
 - `04-step-add-client-config-and-demo.md` — Phase A demo
 - `05-step-add-tests-with-mocked-websocket.md` — tests (ongoing)
-- `06-step-upgrade-protocol-for-v1.md` — Phase C (kill clipboard)
+- `06-step-upgrade-protocol-for-v1.md` — Phase C (add inline reply option; clipboard retained)
 - `06b-phase-c-reference-code.md` — **Phase C: complete code incl. browser change (new)**
 - `07-step-architect-decision-record.md` — ADR (add ADR-005)
 - `08-adapt-from-repo-harness/` — Phase X hardening (instructions, redaction,

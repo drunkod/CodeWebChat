@@ -1,8 +1,13 @@
 # Step 8 — Capture the reply, bundle WASM, manifest/CSP
 
-Make `onRequest` actually drive the chatbot and return the reply **text** (this is
-what replaces the clipboard copy), and make Jazz's WASM/worker load in the
-extension.
+Make `onRequest` actually drive the chatbot and return the reply **text**, and make
+Jazz's WASM/worker load in the extension.
+
+> **Clipboard is retained (decision).** The reply text may be obtained from the
+> **clipboard readback** (the default, kept) and/or an **optional** DOM extractor
+> (`get_latest_reply_text()`). DOM extraction is an _addition_, not a replacement —
+> do NOT remove the clipboard path. Both end with the background worker holding the
+> text; the registry prefers an inline `response_text` and falls back to clipboard.
 
 ## 8.1 Capture the reply as text
 
@@ -15,7 +20,9 @@ on Apply, the content script copies the reply to the clipboard. Now we want the
 ```ts
 import type { ChatRequestRow } from '@shared/jazz/messages'
 
-export async function driveChatbotAndCaptureReply(req: ChatRequestRow): Promise<string> {
+export async function driveChatbotAndCaptureReply(
+  req: ChatRequestRow
+): Promise<string> {
   // 1. open/fill the chatbot (reuse existing message-handler logic)
   const tabId = await openChatbotTab(req.url, req.text, req.prompt_type)
 
@@ -34,7 +41,7 @@ captured text to the background:
 // after capturing the reply text (the same text perform_copy puts on the clipboard):
 chrome.runtime.sendMessage({
   action: 'cwc-reply-text',
-  request_id,                // threaded through like client_id is today
+  request_id, // threaded through like client_id is today
   response_text: replyText
 })
 ```
@@ -62,7 +69,10 @@ loads). MV3 forbids remote code, so ship the assets in the package and point
 
 ```ts
 const db = await createDb({
-  appId, serverUrl, secret, driver: { type: 'memory' },
+  appId,
+  serverUrl,
+  secret,
+  driver: { type: 'memory' },
   runtimeSources: {
     wasmUrl: chrome.runtime.getURL('jazz/jazz_wasm_bg.wasm')
     // workerUrl: only if memory mode still needs it (confirm)
@@ -76,8 +86,10 @@ const db = await createDb({
 {
   "permissions": ["storage", "alarms"],
   "host_permissions": [
-    "http://localhost:55155/", "ws://localhost:55155/",   // legacy fallback
-    "ws://localhost:1625/", "http://localhost:1625/"       // Jazz local sync
+    "http://localhost:55155/",
+    "ws://localhost:55155/", // legacy fallback
+    "ws://localhost:1625/",
+    "http://localhost:1625/" // Jazz local sync
     // add "wss://v2.sync.jazz.tools/*" for remote (Step 10)
   ],
   "content_security_policy": {
@@ -95,6 +107,7 @@ const db = await createDb({
 ## 8.4 The two-build reality
 
 Confirm CWC's extension bundler (likely esbuild/webpack/vite) can:
+
 - emit the Jazz WASM asset into `dist/jazz/`,
 - not try to inline remote code,
 - resolve `jazz-tools` for a browser/SW target (it may need the same

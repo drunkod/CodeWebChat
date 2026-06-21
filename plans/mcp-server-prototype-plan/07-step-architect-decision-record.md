@@ -153,14 +153,16 @@ The `close` handler calls `pending_apply_response.reject(CWC_DISCONNECTED)` imme
 
 ---
 
-## ADR-007: V1 adds `request_id` and `response_text` to remove clipboard dependence
+## ADR-007: V1 adds `request_id` and `response_text` to reduce clipboard dependence (clipboard retained)
 
 **Status:** Proposed  
 **Date:** 2026-06
 
 ### Context
 
-V0 limitations: clipboard dependence, single in-flight request per connection.
+V0 limitations: clipboard is the _only_ return path, single in-flight request per
+connection. (Decision: keep the clipboard as a supported fallback; add an inline
+path rather than removing it.)
 
 ### Decision
 
@@ -174,7 +176,8 @@ production chatbot DOMs.
 
 ### Consequences
 
-- Clipboard is no longer required for updated chatbot integrations.
+- Clipboard is no longer the _only_ path for updated chatbot integrations, but it is
+  retained as the fallback (inline `response_text` preferred when present).
 - Concurrent requests are safe when `request_id` is present.
 - 20+ chatbot integrations need per-chatbot `extract_response_text` implementations.
   Done incrementally: Claude, ChatGPT, Gemini first; the rest in follow-up PRs.
@@ -203,7 +206,7 @@ Two phases:
 - **Phase A — client mode (Mode A):** keep Steps 1–4 as a validation harness. The
   MCP server connects to the existing relay with token `gemini-coder-vscode`.
   Requires VS Code running.
-- **Phase B — host mode (Mode B), the deliverable:** the MCP server *hosts* the
+- **Phase B — host mode (Mode B), the deliverable:** the MCP server _hosts_ the
   relay on 55155 itself (port the minimum of `WebSocketServer` per Step 2b). The
   browser extension connects directly to the MCP server; VS Code is not involved.
 
@@ -241,7 +244,7 @@ Response). repo-harness has no pattern for this. See
 returns a ticket immediately; `poll` returns the reply when ready or `pending`
 after a short capped wait (≤30s). This survives MCP-client request timeouts (the
 Inspector's 60s "Maximum Total Timeout" forced this realization during A.4),
-because the unbounded human delay now lives *between* calls, not inside one.
+because the unbounded human delay now lives _between_ calls, not inside one.
 
 Implementation for the current client-mode code reuses the existing
 `sendPromptAndWait` via `beginPrompt`/`pollPrompt` — see the "Client-mode
@@ -388,10 +391,22 @@ server.registerTool(
       'Do not call this tool concurrently from the same MCP server process.'
     ].join(' '),
     inputSchema: {
-      url: z.string().url().describe('Target chatbot URL, e.g. https://claude.ai/new or https://chatgpt.com/.'),
+      url: z
+        .string()
+        .url()
+        .describe(
+          'Target chatbot URL, e.g. https://claude.ai/new or https://chatgpt.com/.'
+        ),
       text: z.string().min(1).describe('Prompt to send to the chatbot.'),
       model: z.string().optional().describe('Optional chatbot model name.'),
-      target_browser_id: z.number().int().positive().optional().describe('Optional browser client ID when multiple browsers are connected.'),
+      target_browser_id: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          'Optional browser client ID when multiple browsers are connected.'
+        ),
       temperature: z.number().min(0).max(2).optional(),
       thinking_budget: z.number().int().positive().optional(),
       reasoning_effort: z.string().optional(),
@@ -409,7 +424,9 @@ server.registerTool(
         .positive()
         .max(900000)
         .optional()
-        .describe('Max ms to wait for Apply Response click. Default 300000 (5 min).')
+        .describe(
+          'Max ms to wait for Apply Response click. Default 300000 (5 min).'
+        )
     }
   },
   async (input) => {
@@ -441,7 +458,10 @@ Tests verify that guards actually reject bad input — not that constants equal 
 ```ts
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { rejectUnsupportedV0Fields, getServerInstructions } from '../src/guards.js'
+import {
+  rejectUnsupportedV0Fields,
+  getServerInstructions
+} from '../src/guards.js'
 
 test('rejectUnsupportedV0Fields rejects without_submission (ADR-005)', () => {
   assert.throws(
@@ -484,11 +504,27 @@ test('rejectUnsupportedV0Fields allows valid V0 fields through', () => {
 
 test('getServerInstructions mentions key V0 constraints', () => {
   const instructions = getServerInstructions()
-  assert.match(instructions, /Apply Response/i, 'should mention the required user action')
-  assert.match(instructions, /raw response text/i, 'should clarify no file editing')
-  assert.match(instructions, /concurrently/i, 'should warn against concurrent calls')
+  assert.match(
+    instructions,
+    /Apply Response/i,
+    'should mention the required user action'
+  )
+  assert.match(
+    instructions,
+    /raw response text/i,
+    'should clarify no file editing'
+  )
+  assert.match(
+    instructions,
+    /concurrently/i,
+    'should warn against concurrent calls'
+  )
   assert.match(instructions, /clipboard/i, 'should mention clipboard transport')
-  assert.match(instructions, /without_submission/i, 'should mention unsupported field')
+  assert.match(
+    instructions,
+    /without_submission/i,
+    'should mention unsupported field'
+  )
 })
 ```
 

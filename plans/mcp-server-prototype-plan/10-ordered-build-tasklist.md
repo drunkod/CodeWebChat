@@ -7,11 +7,11 @@ Phase letters match `00-START-HERE.md`.
 
 > **Progress:** Phases 0, A, B **complete** — **core goal reached** (host mode
 > demo passed with VS Code closed, 2026-06-20). Decision Gate 1 = Option C.
-> Next: host-mode tests (T.3) and Phase C (drop the clipboard).
+> Next: host-mode tests (T.3) and Phase C (add an inline reply option; clipboard retained).
 
 ---
 
-## Phase 0 — Scaffold  (plan: Step 1) ✅ DONE
+## Phase 0 — Scaffold (plan: Step 1) ✅ DONE
 
 - [x] **0.1** Create `apps/mcp-server/` package (`package.json`, `tsconfig.json`).
 - [x] **0.2** Add `src/protocol.ts` (mirror `@shared` message types + tokens +
@@ -19,41 +19,39 @@ Phase letters match `00-START-HERE.md`.
 - [x] **0.3** `pnpm install` + `pnpm --filter cwc-mcp-server build` from repo root;
       confirm `dist/index.js` exists.
 
-*Exit:* package builds. ✅
+_Exit:_ package builds. ✅
 
 ---
 
-## Phase A — Client mode end-to-end  (plan: Steps 2, 3, 4) ✅ DONE
+## Phase A — Client mode end-to-end (plan: Steps 2, 3, 4) ✅ DONE
 
 - [x] **A.1** Build the client bridge `src/cwc-bridge.ts` (Step 2): connect as
       `gemini-coder-vscode`, await `client-id-assignment`, send `initialize-chat`,
       await `apply-chat-response`, clipboard before/after guard, **reject in-flight
-      on `ws.on('close')`** (`CWC_DISCONNECTED`). *(now superseded by ClientTransport
-      + RequestRegistry in B.1–B.3; file orphaned/removable.)*
+      on `ws.on('close')`** (`CWC_DISCONNECTED`). _(now superseded by ClientTransport + RequestRegistry in B.1–B.3; file orphaned/removable.)_
 - [x] **A.2** Register the two tools `src/index.ts` (Step 3): `cwc_status`,
       `send_to_codewebchat`.
 - [x] **A.3** Wire MCP client config (Step 4): Claude Desktop / Cursor JSON,
       `npx @modelcontextprotocol/inspector`.
 - [x] **A.4** ✅ **Checkpoint demo (VS Code OPEN):** prompt → browser opens →
-      click Apply → tool returns clipboard text. *(Verified live against Gemini.)*
+      click Apply → tool returns clipboard text. _(Verified live against Gemini.)_
 
-*Exit:* the Step 4 demo passes with the VS Code extension running. ✅
+_Exit:_ the Step 4 demo passes with the VS Code extension running. ✅
 
 ---
 
 ## ◆ Decision gate 1 — blocking-call design (ADR-009) ✅ DONE → Option C
 
 - [x] **G1** Chose **Option C** (split `send`+`poll`). Recorded in ADR-009 (`07`).
-      *(The Inspector's 60s "Maximum Total Timeout" during A.4 forced this.)*
+      _(The Inspector's 60s "Maximum Total Timeout" during A.4 forced this.)_
 
 - [x] **G1.1** Add `CWC_UNKNOWN_TICKET` to `errors.ts`.
 - [x] **G1.2** Add `src/request-registry.ts` (`03b`); `require_request_id:false`.
-- [x] **G1.3** Replace the single tool with `send_to_codewebchat` (returns ticket)
-      + `poll_cwc_response` (`03b`). Re-ran the round-trip with the two-call flow.
+- [x] **G1.3** Replace the single tool with `send_to_codewebchat` (returns ticket) + `poll_cwc_response` (`03b`). Re-ran the round-trip with the two-call flow.
 
 ---
 
-## Phase B — Host mode (the goal)  (plan: 02b pointers, 02c code)
+## Phase B — Host mode (the goal) (plan: 02b pointers, 02c code)
 
 Depends on: Phase A green, Decision gate 1. ✅
 
@@ -66,8 +64,8 @@ Depends on: Phase A green, Decision gate 1. ✅
 - [x] **B.3** `src/client-transport.ts` — Mode A connect/handshake/browser-status
       as `CwcTransport`; `index.ts` rewired to `ClientTransport` + `RequestRegistry`;
       `server.test.ts` asserts `poll_cwc_response`. Build + 9 tests green.
-      *(Recommended: rebuild in Nix + re-run the Inspector `send → Apply → poll`
-      round-trip once to confirm the live regression.)*
+      _(Recommended: rebuild in Nix + re-run the Inspector `send → Apply → poll`
+      round-trip once to confirm the live regression.)_
 
 - [x] **B.4** `src/host-transport.ts` — hosts the relay on 55155: HTTP `/health`,
       accepts `gemini-coder` browser clients, sends `initialize-chat` to the browser
@@ -82,18 +80,19 @@ Depends on: Phase A green, Decision gate 1. ✅
       `send` → ticket; `poll` → pending → **done** with the real Gemini reply.
       Browser stayed connected through the Apply wait (ping fix verified).
 
-*Exit:* ✅ the demo passes with VS Code **closed** — the editor extension's
+_Exit:_ ✅ the demo passes with VS Code **closed** — the editor extension's
 browser-bridge role is replaced. **Phase B complete; core goal reached.**
 
 ---
 
-## Phase C — Remove the clipboard  (plan: Step 6, 06b)  ▢ not started
+## Phase C — Add an inline reply option (clipboard RETAINED) (plan: Step 6, 06b) ▢ not started
 
-Depends on: Phase B (cleanest when you own the server).
+Depends on: Phase B (cleanest when you own the server). **Decision: clipboard
+support is kept; this phase only _adds_ an inline `response_text` path.**
 
 - [ ] **C.1** Add optional `request_id` + `response_text` to
       `packages/shared/.../websocket-message.ts` and `src/protocol.ts` (both
-      messages) (`06b §1`). *Backward compatible — both optional.*
+      messages) (`06b §1`). _Backward compatible — both optional._
 - [ ] **C.2** Registry: generate `request_id`, match on it, prefer
       `response_text`, keep clipboard fallback (`06b §2`).
 - [ ] **C.3 — browser change** (`06b §3`): thread `request_id` storage→observer→
@@ -102,75 +101,76 @@ Depends on: Phase B (cleanest when you own the server).
       → `response_text`; forward both fields in `message-handler.ts`. Add the two
       fields to `apps/browser/src/types/messages.ts`.
 - [ ] **C.4** Flip `require_request_id: true` (safe concurrency) if on Option C.
-- [ ] **C.5** ✅ **Checkpoint:** put junk on the OS clipboard, run a prompt, click
-      Apply → tool returns the chatbot reply, not the junk.
-- [ ] **C.6** Cleanup once stable: delete clipboard read, `clipboardy` dep, and the
-      two clipboard error codes.
+- [ ] **C.5** ✅ **Checkpoint (optional capability):** with inline `response_text`,
+      the tool returns the reply without reading the clipboard. This proves the
+      inline path works — it is NOT a requirement to disable clipboard.
+- [ ] **C.6** KEEP clipboard read, `clipboardy` dep, and clipboard error codes —
+      clipboard stays a supported path. (Do NOT delete.)
 
-*Exit:* OS clipboard is out of the response path.
+_Exit:_ OS clipboard is out of the response path.
 
 ---
 
-## Phase X — Hardening (cross-cutting)  (plan: `08-adapt-from-repo-harness/`)
+## Phase X — Hardening (cross-cutting) (plan: `08-adapt-from-repo-harness/`)
 
 Can start during Phase A; finish before you call it shippable. Build order from
 `08-.../00-README.md`:
 
 - [x] **X.1** Tighten server `instructions`, boundary + first-512-chars
-      self-contained (`08-.../01`). *(`src/instructions.ts` created.)*
+      self-contained (`08-.../01`). _(`src/instructions.ts` created.)_
 - [ ] **X.2** Add tool `annotations` (`readOnlyHint` etc.) + strict schemas
       (`08-.../04`).
 - [ ] **X.3** Add `redact()` and run clipboard output **and** error messages
       through it (`08-.../03`).
 - [ ] **X.4** Stable error codes / closed union used in tests (`08-.../02`).
-      *(Partial: `CwcMcpError` codes exist; not yet surfaced through tool results
-      or asserted as a closed union.)*
+      _(Partial: `CwcMcpError` codes exist; not yet surfaced through tool results
+      or asserted as a closed union.)_
 - [ ] **X.5** Ship `cwc_doctor` (WS on 55155 + clipboard, each failure with a fix)
       (`08-.../11`).
 - [ ] **X.6** Effects injection (WS factory + clock + clipboard) for tests
-      (`08-.../05`). *(Partial: `read_clipboard` is injected into the registry;
-      WS factory + clock not yet.)*
+      (`08-.../05`). _(Partial: `read_clipboard` is injected into the registry;
+      WS factory + clock not yet.)_
 - [ ] **X.7** Hash-only audit log, try/catch-wrapped, gitignored (`08-.../06`).
 - [ ] **X.8** Pin the MCP SDK version (`08-.../12`).
 
 ---
 
-## Testing (continuous, from Phase A)  (plan: Step 5)
+## Testing (continuous, from Phase A) (plan: Step 5)
 
-- [ ] **T.1** Unit: `redact()`, error codes, clipboard guards. *(Partial:
+- [ ] **T.1** Unit: `redact()`, error codes, clipboard guards. _(Partial:
       `errors.test.ts` covers `CwcMcpError`/`toErrorText`; `redact()` + clipboard
-      guards pending.)*
+      guards pending.)_
 - [ ] **T.2** Integration: tool ↔ transport ↔ **fake** WebSocket (client mode).
-      *(Have real-stdio integration in `server.test.ts`; a fake-WebSocket harness
-      for deterministic apply/disconnect is still pending.)*
+      _(Have real-stdio integration in `server.test.ts`; a fake-WebSocket harness
+      for deterministic apply/disconnect is still pending.)_
 - [ ] **T.3** Host mode: drive a **fake browser** on an ephemeral port; assert
       `initialize-chat` received, apply resolves, disconnect rejects,
-      double-bind → `CWC_PORT_IN_USE` (`02c §7`). *(needs B.4)*
+      double-bind → `CWC_PORT_IN_USE` (`02c §7`). _(needs B.4)_
 - [ ] **T.4** Split mode: send-returns-fast, pending→done, unknown ticket,
-      disconnect (`03b §4`). *(Partial: unknown-ticket asserted in `server.test.ts`.)*
-- [ ] **T.5** Phase C: inline `response_text` (clipboard untouched) + back-compat
-      fallback (`06b §5`). *(needs Phase C)*
+      disconnect (`03b §4`). _(Partial: unknown-ticket asserted in `server.test.ts`.)_
+- [ ] **T.5** Phase C: inline `response_text` path + clipboard fallback path (both
+      supported; clipboard retained) (`06b §5`). _(needs Phase C)_
 - [x] **T.6** One stdio smoke test via the official `Client` + `StdioClientTransport`
       (`server.test.ts` — lists tools, validates args).
 
 ---
 
-## ◆ Decision gate 2 — response capture (Phase C only)  ▢ not reached
+## ◆ Decision gate 2 — response capture (Phase C only) ▢ not reached
 
 - [ ] **G2** Option A (clipboard readback in the click — minimal, all chatbots) vs
       Option B (per-chatbot `get_response_text` DOM scrape — robust, incremental).
-      *Recommended: ship A; add B per chatbot where DOM proves more reliable.*
+      _Recommended: ship A; add B per chatbot where DOM proves more reliable._
       Record in ADR-007 (`07`).
 
 ---
 
 ## Decisions ledger (record in `07` ADR as you pass each gate)
 
-| Gate | Decision | ADR | Status |
-| --- | --- | --- | --- |
-| G1 | Blocking call: A vs C | ADR-009 | ✅ Accepted — **C (split send+poll)** |
-| — | Mode A → Mode B phasing | ADR-008 | ✅ Proposed — A validates, B ships |
-| G2 | Response capture: A vs B | ADR-007 | ▢ open (Phase C) |
+| Gate | Decision                 | ADR     | Status                                |
+| ---- | ------------------------ | ------- | ------------------------------------- |
+| G1   | Blocking call: A vs C    | ADR-009 | ✅ Accepted — **C (split send+poll)** |
+| —    | Mode A → Mode B phasing  | ADR-008 | ✅ Proposed — A validates, B ships    |
+| G2   | Response capture: A vs B | ADR-007 | ▢ open (Phase C)                      |
 
 ---
 
@@ -179,7 +179,7 @@ Can start during Phase A; finish before you call it shippable. Build order from
 ```
 0.1→0.3  →  A.1→A.4 (demo, VS Code open)  →  G1  →  B.1→B.7 (demo, VS Code CLOSED ✅)  →  C.1→C.5
   ✅DONE           ✅ DONE                    ✅              ✅ DONE — GOAL REACHED            ⬅ next (▢)
-            └ validate the handshake ┘            └──── replaced the extension ────┘      └ kill clipboard ┘
+            └ validate the handshake ┘            └──── replaced the extension ────┘      └ +inline reply (clip kept) ┘
 ```
 
 Hardening (X) and tests (T) run alongside; don't let them block the A.4 and B.7

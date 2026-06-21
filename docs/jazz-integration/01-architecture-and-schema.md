@@ -7,16 +7,16 @@
 > same `appId` + **row-level permissions** (`allow*.always()` for the private
 > channel). The `04` doc is the authoritative design.
 
-All code here is **illustrative** — the *shape* of the integration. The exact,
+All code here is **illustrative** — the _shape_ of the integration. The exact,
 confirmed decisions live in `04`.
 
 ## Players
 
-| Peer | Jazz role | Setup API | Lives in |
-| --- | --- | --- | --- |
-| MCP server (Node) | **backend context** | `createJazzContext({...})` → `context.asBackend()` | `apps/mcp-server` |
-| Chrome extension (background SW) | **client** | `createDb({ appId, secret, serverUrl })` | `apps/browser/src/background` |
-| Sync server | **edge** | `npx jazz-tools@alpha server <appId> --port 1625` | local process (or cloud) |
+| Peer                             | Jazz role           | Setup API                                          | Lives in                      |
+| -------------------------------- | ------------------- | -------------------------------------------------- | ----------------------------- |
+| MCP server (Node)                | **backend context** | `createJazzContext({...})` → `context.asBackend()` | `apps/mcp-server`             |
+| Chrome extension (background SW) | **client**          | `createDb({ appId, secret, serverUrl })`           | `apps/browser/src/background` |
+| Sync server                      | **edge**            | `npx jazz-tools@alpha server <appId> --port 1625`  | local process (or cloud)      |
 
 Both peers must share a **Group** (Jazz's permission unit) so each can read the
 other's rows. See `03-...` Q on the simplest headless sharing pattern.
@@ -31,17 +31,17 @@ import { defineApp, table, column as c } from 'jazz-tools/schema' // shape TBD �
 
 export const app = defineApp({
   chat_requests: table({
-    request_id: c.text(),          // correlation id (uuid)
-    url: c.text(),                 // chatbot URL
-    text: c.text(),                // the prompt
-    prompt_type: c.text(),         // 'edit-context' etc.
-    status: c.text(),              // 'pending' | 'sent' | 'done' | 'failed'
+    request_id: c.text(), // correlation id (uuid)
+    url: c.text(), // chatbot URL
+    text: c.text(), // the prompt
+    prompt_type: c.text(), // 'edit-context' etc.
+    status: c.text(), // 'pending' | 'sent' | 'done' | 'failed'
     created_at: c.timestamp()
   }),
   chat_responses: table({
-    request_id: c.text(),          // matches chat_requests.request_id
-    response_text: c.text(),       // THE REPLY — no clipboard needed
-    status: c.text(),              // 'done' | 'error'
+    request_id: c.text(), // matches chat_requests.request_id
+    response_text: c.text(), // THE REPLY (inline option; clipboard retained as fallback)
+    status: c.text(), // 'done' | 'error'
     error: c.text().nullable(),
     created_at: c.timestamp()
   })
@@ -65,24 +65,35 @@ import { app } from './schema.js'
 const context = createJazzContext({
   appId: process.env.JAZZ_APP_ID!,
   app,
-  permissions,                       // permissions.ts
+  permissions, // permissions.ts
   driver: { type: 'persistent', dataPath: './.jazz/mcp.db' },
   serverUrl: process.env.JAZZ_SERVER_URL ?? 'ws://localhost:1625', // LOCAL default
-  allowLocalFirstAuth: true          // local dev: no external IdP
+  allowLocalFirstAuth: true // local dev: no external IdP
 })
 const db = context.asBackend()
 
 // send a prompt = insert a request row (wait for the edge so we know it synced)
-export async function sendPrompt(req: { request_id: string; url: string; text: string; prompt_type: string }) {
-  await db.insert(app.chat_requests, { ...req, status: 'pending', created_at: Date.now() })
-    // .wait({ tier: 'edge' })  // confirm the sync server has the command row
+export async function sendPrompt(req: {
+  request_id: string
+  url: string
+  text: string
+  prompt_type: string
+}) {
+  await db.insert(app.chat_requests, {
+    ...req,
+    status: 'pending',
+    created_at: Date.now()
+  })
+  // .wait({ tier: 'edge' })  // confirm the sync server has the command row
 }
 
 // receive = subscribe to the matching response row
 export function onResponse(request_id: string, cb: (text: string) => void) {
   return db.subscribeAll(
     app.chat_responses.where({ request_id }),
-    ({ all }) => { if (all[0]) cb(all[0].response_text) }
+    ({ all }) => {
+      if (all[0]) cb(all[0].response_text)
+    }
   )
 }
 ```
@@ -101,24 +112,30 @@ import { app } from '@shared/schema'
 const secret = await BrowserAuthSecretStore.getOrCreateSecret({ appId: APP_ID })
 const db = await createDb({
   appId: APP_ID,
-  secret,                                   // device identity (persist in chrome.storage.local)
-  serverUrl: 'ws://localhost:1625',         // LOCAL default; remote later
-  driver: { type: 'memory' }                // REQUIRED in MV3 SW: persistent mode throws
-                                            // (no SharedWorker/Web Locks/OPFS). See 04.
+  secret, // device identity (persist in chrome.storage.local)
+  serverUrl: 'ws://localhost:1625', // LOCAL default; remote later
+  driver: { type: 'memory' } // REQUIRED in MV3 SW: persistent mode throws
+  // (no SharedWorker/Web Locks/OPFS). See 04.
 })
 
 // react to new prompt requests
-db.subscribeAll(app.chat_requests.where({ status: 'pending' }), async ({ all }) => {
-  for (const reqRow of all) {
-    await openChatbotAndFill(reqRow.url, reqRow.text)   // existing CWC automation
-    // when the chatbot reply is captured (DOM extract or Apply click):
-    const response_text = await captureReply()
-    await db.insert(app.chat_responses, {
-      request_id: reqRow.request_id, response_text, status: 'done', created_at: Date.now()
-    })
-    await db.update(app.chat_requests, reqRow.id, { status: 'done' })
+db.subscribeAll(
+  app.chat_requests.where({ status: 'pending' }),
+  async ({ all }) => {
+    for (const reqRow of all) {
+      await openChatbotAndFill(reqRow.url, reqRow.text) // existing CWC automation
+      // when the chatbot reply is captured (DOM extract or Apply click):
+      const response_text = await captureReply()
+      await db.insert(app.chat_responses, {
+        request_id: reqRow.request_id,
+        response_text,
+        status: 'done',
+        created_at: Date.now()
+      })
+      await db.update(app.chat_requests, reqRow.id, { status: 'done' })
+    }
   }
-})
+)
 ```
 
 The content scripts stay as-is (DOM automation only); the background worker swaps
@@ -134,7 +151,8 @@ its WebSocket client for the Jazz client.
 5. (sync) → MCP's subscribe(chat_responses where request_id=...) fires → returns text
 ```
 
-No port 55155, no `gemini-coder` token, no clipboard. Correlation is the
+No port 55155, no `gemini-coder` token; the reply rides inline in the row, with the
+OS clipboard retained as a fallback capture path. Correlation is the
 `request_id` column (Jazz handles delivery/offline/reconnect).
 
 ## 5. MV3 client host — RESOLVED ✅ (use memory mode)
@@ -150,11 +168,11 @@ localhost server; on SW kill/restart it reconnects and subscriptions replay. The
 
 ## 6. What stays / what changes
 
-| Component | Change |
-| --- | --- |
-| `cwc-mcp-server` host transport | Add `JazzTransport` (insert/subscribe). Keep `HostTransport` (WS) as a fallback adapter behind a `--transport jazz\|ws` flag. |
-| `RequestRegistry` / review tools | Unchanged — they call the transport contract. |
-| `apps/browser/.../background/websocket.ts` | Replace WS client with Jazz client (or add `jazz.ts` and feature-flag). |
-| content scripts | Unchanged (DOM automation). The `response_text` capture replaces the clipboard copy on Apply. |
-| `packages/shared` | Add the Jazz `schema.ts` + `permissions.ts` (shared by both peers). |
-| OS clipboard / `clipboardy` | Removed from the response path. |
+| Component                                  | Change                                                                                                                        |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `cwc-mcp-server` host transport            | Add `JazzTransport` (insert/subscribe). Keep `HostTransport` (WS) as a fallback adapter behind a `--transport jazz\|ws` flag. |
+| `RequestRegistry` / review tools           | Unchanged — they call the transport contract.                                                                                 |
+| `apps/browser/.../background/websocket.ts` | Replace WS client with Jazz client (or add `jazz.ts` and feature-flag).                                                       |
+| content scripts                            | Unchanged (DOM automation). The `response_text` capture is an inline option _in addition to_ the clipboard copy on Apply.     |
+| `packages/shared`                          | Add the Jazz `schema.ts` + `permissions.ts` (shared by both peers).                                                           |
+| OS clipboard / `clipboardy`                | Retained as a fallback capture path (inline `response_text` preferred when present).                                          |

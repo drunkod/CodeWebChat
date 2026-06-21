@@ -16,7 +16,7 @@ The convergence with what we've built is the important insight:
 
 - **Transport already exists.** The `cwc-mcp-server` (host mode, Phase B — done)
   hosts the WebSocket relay itself and sends a prompt to a browser chatbot, then
-  returns its reply. The ChatGPT review page *is* a browser chatbot. So
+  returns its reply. The ChatGPT review page _is_ a browser chatbot. So
   "send a review request → get the review back" is the `send_to_codewebchat` /
   `poll_cwc_response` loop we already shipped.
 - **No editor lock-in.** Because host mode removed the VS Code dependency, the
@@ -59,6 +59,7 @@ Every arrow except the two new orchestration steps is already built.
 > two windows.**
 
 **Acceptance (MVP):**
+
 - The handoff packet contains: `repo`, `base_branch`, `draft_branch`,
   `commit_sha`, `commit_title`, `summary`, `changed_files`, `review_focus`.
 - The request is sent to the ChatGPT page via the existing host-mode tools.
@@ -70,14 +71,14 @@ Every arrow except the two new orchestration steps is already built.
 
 1. **Draft review handoff** — capture final draft changes into a review branch and
    send branch + commit metadata, so I get a second opinion without rebuilding
-   context. *Accept:* the packet carries repo/base/draft/SHA/files/summary/mode.
+   context. _Accept:_ the packet carries repo/base/draft/SHA/files/summary/mode.
 2. **Handoff without brittle copy-paste** — the review page opens with the right
-   context automatically. *Accept:* on failure, a manual-copy fallback payload.
+   context automatically. _Accept:_ on failure, a manual-copy fallback payload.
 3. **Feedback import back into Zed** — the review returns as an editor-friendly
    fix packet (blockers / non-blockers / suggested tests / smallest-patch plan).
 4. **Review mode selection** — choose intent before sending (bug risk,
    architecture, test adequacy, merge readiness); the reviewer prompt adapts.
-   *Accept:* a `review_focus` field changes the prompt.
+   _Accept:_ a `review_focus` field changes the prompt.
 5. **Safe iteration loop** — each round is traceable to a commit/branch state;
    refuse to apply feedback if branch HEAD no longer matches the reviewed SHA.
 6. **In-editor fallback review** — if the browser flow is down, open the branch
@@ -110,20 +111,22 @@ chatbot integrations — they're "free-ish" because the primitives are built:
 
 ## Where clipboard fits (your open question)
 
-Short answer: **clipboard is the current *return* path, not the core design — keep
-it for the MVP, plan to remove it.**
+Short answer: **clipboard is a supported _return_ path, not the core design — keep
+it (decision: do NOT remove clipboard) and add inline `response_text` alongside it.**
 
-- The review *request* goes out as a structured prompt (no clipboard).
-- The review *reply* currently comes back when you click CodeWebChat **Apply
+- The review _request_ goes out as a structured prompt (no clipboard).
+- The review _reply_ currently comes back when you click CodeWebChat **Apply
   Response**, which copies the chatbot text to the OS clipboard and the MCP server
   returns it. That's fine for the MVP.
-- **Phase C** (`request_id` + inline `response_text`) removes the clipboard from
-  the return path entirely. For the review use case — where the reply is long,
-  structured text you want intact — Phase C is now *more* valuable, so it moves up
-  the priority list. The research's "don't make clipboard the core dependency"
-  lands exactly here: it's a convenience/fallback, not the architecture.
+- **Phase C** (`request_id` + inline `response_text`) _adds_ an inline return path
+  and keeps the clipboard as a fallback. For the review use case — where the reply
+  is long, structured text you want intact — Phase C is now _more_ valuable, so it
+  moves up the priority list. The research's "don't make clipboard the core
+  dependency" lands exactly here: clipboard stays as a convenience/fallback, not the
+  sole architecture.
 
-So: clipboard = useful now, removed by Phase C. Not a reason to redesign.
+So: clipboard = supported throughout (retained), with inline reply added by Phase C.
+Not a reason to redesign.
 
 ---
 
@@ -139,6 +142,6 @@ Three prompts to template (full text in `deep-research-report-5.md`):
 3. **Feedback-back prompt** — turns the review into an editor remediation prompt
    (fix blockers first, smallest coherent patch, summarize what changed).
 4. **Machine-readable JSON variant** — `{verdict, risk, findings[], tests[],
-   editor_patch_plan[]}` so import-back-to-Zed is mechanical.
+editor_patch_plan[]}` so import-back-to-Zed is mechanical.
 
 These become our `instructions` / tool descriptions in the next plan doc.

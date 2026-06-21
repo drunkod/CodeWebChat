@@ -53,12 +53,17 @@ export function add_apply_response_button(params: {
       if (params.request_id) {
         try {
           const response_text = await navigator.clipboard.readText()
-          browser.runtime.sendMessage<Message>({
+          await browser.runtime.sendMessage<Message>({
             action: 'cwc-reply-text',
             request_id: params.request_id,
             response_text
           })
         } catch (err) {
+          await browser.runtime.sendMessage<Message>({
+            action: 'cwc-reply-text',
+            request_id: params.request_id,
+            response_text: ''
+          })
           Logger.error({
             function_name: 'add_apply_response_button',
             message: 'Failed to read clipboard text for Jazz reply capture',

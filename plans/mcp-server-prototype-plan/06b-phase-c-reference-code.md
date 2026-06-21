@@ -1,20 +1,28 @@
-# Step 6b — Phase C: kill the clipboard (complete code, incl. the browser change)
+# Step 6b — Phase C: add an inline reply option (clipboard retained)
+
+> ⚠️ **DECISION: do NOT delete clipboard support.** This step is now _additive_:
+> it adds an inline `response_text` reply path. The OS clipboard remains a
+> first-class, supported capture/return path. The registry **prefers** inline
+> `response_text` when present and **falls back to the clipboard**
+> (`use_clipboard_fallback`, default `true`). Ignore any wording below that says
+> "kill/remove/delete the clipboard" — treat those as "inline becomes available,"
+> not removal.
 
 Companion to `06-step-upgrade-protocol-for-v1.md`. Complete, copy-ready code for
-removing the OS-clipboard dependency by adding `request_id` + `response_text` to
-the protocol. These are **plan code examples** (diffs to apply when you build
-Phase C), not edits to any repo resource.
+adding `request_id` + `response_text` to the protocol so the reply _can_ be carried
+inline. These are **plan code examples** (diffs to apply when you build the inline
+path), not edits to any repo resource.
 
 ## The key insight (why this change is small)
 
 The browser extension **already copies the response to the OS clipboard** when the
-user clicks *Apply Response* — each chatbot integration provides a `perform_copy`
+user clicks _Apply Response_ — each chatbot integration provides a `perform_copy`
 that clicks the site's native copy button
 (`apps/browser/.../utils/add-apply-response-button.ts:43`).
 
 So instead of the **MCP server** racing the OS clipboard (fragile: timing,
 permissions, the `CWC_CLIPBOARD_UNCHANGED` guard), the **browser** reads its own
-clipboard *inside the same click gesture* and sends the text over the WebSocket.
+clipboard _inside the same click gesture_ and sends the text over the WebSocket.
 The MCP server then never touches the clipboard at all.
 
 ```
@@ -38,15 +46,15 @@ export type InitializeChatMessage = {
   text: string
   url: string
   client_id: number
-  request_id?: string        // NEW: correlate one prompt ↔ one response
+  request_id?: string // NEW: correlate one prompt ↔ one response
   // ...all existing optional fields unchanged
 }
 
 export type ApplyChatResponseMessage = {
   action: 'apply-chat-response'
   client_id: number
-  request_id?: string        // NEW: echoed back by the browser
-  response_text?: string     // NEW: the chatbot reply, sent inline
+  request_id?: string // NEW: echoed back by the browser
+  response_text?: string // NEW: the chatbot reply, sent inline
   raw_instructions?: string
   edit_format?: string
   url?: string
@@ -98,7 +106,9 @@ export class PromptRunner {
   }
 
   private async run(input: SendPromptInput): Promise<string> {
-    const { client_id } = await this.transport.ensureReady(input.connect_timeout_ms ?? 3000)
+    const { client_id } = await this.transport.ensureReady(
+      input.connect_timeout_ms ?? 3000
+    )
     const request_id = randomUUID()
 
     // Only read the "before" clipboard if we might need the fallback.
@@ -110,9 +120,9 @@ export class PromptRunner {
     this.transport.sendInitializeChat({
       action: 'initialize-chat',
       client_id,
-      request_id,                     // NEW
+      request_id, // NEW
       text: input.text,
-      url: input.url,
+      url: input.url
       // ...rest of the fields unchanged
     })
 
@@ -127,7 +137,10 @@ export class PromptRunner {
     await sleep(this.clipboard_read_delay_ms)
     const after_clipboard = await this.read_clipboard()
     if (!after_clipboard.trim()) {
-      throw new CwcMcpError('Apply Response completed, but the clipboard was empty.', 'CWC_CLIPBOARD_EMPTY')
+      throw new CwcMcpError(
+        'Apply Response completed, but the clipboard was empty.',
+        'CWC_CLIPBOARD_EMPTY'
+      )
     }
     if (after_clipboard === before_clipboard) {
       throw new CwcMcpError(
@@ -138,28 +151,45 @@ export class PromptRunner {
     return after_clipboard
   }
 
-  private waitForApply(request_id: string, client_id: number, timeout_ms: number) {
+  private waitForApply(
+    request_id: string,
+    client_id: number,
+    timeout_ms: number
+  ) {
     return new Promise<ApplyChatResponseMessage>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending = null
-        reject(new CwcMcpError(
-          `Timed out after ${timeout_ms}ms waiting for Apply Response. The user must click Apply Response in the chatbot tab.`,
-          'CWC_TIMEOUT'
-        ))
+        reject(
+          new CwcMcpError(
+            `Timed out after ${timeout_ms}ms waiting for Apply Response. The user must click Apply Response in the chatbot tab.`,
+            'CWC_TIMEOUT'
+          )
+        )
       }, timeout_ms)
       this.pending = {
-        request_id, client_id,
-        resolve: (m) => { clearTimeout(timer); this.pending = null; resolve(m) },
-        reject:  (e) => { clearTimeout(timer); this.pending = null; reject(e) }
+        request_id,
+        client_id,
+        resolve: (m) => {
+          clearTimeout(timer)
+          this.pending = null
+          resolve(m)
+        },
+        reject: (e) => {
+          clearTimeout(timer)
+          this.pending = null
+          reject(e)
+        }
       }
     })
   }
 }
 ```
 
-Net effect: once the browser sends `response_text`, the entire clipboard block is
-dead code you can later delete — along with `read_clipboard`, the `clipboardy`
-dependency, and the two clipboard error codes.
+Net effect: once the browser sends `response_text`, the registry prefers it and the
+clipboard block becomes the fallback path. **Decision: keep the clipboard block,
+`read_clipboard`, the `clipboardy` dependency, and the clipboard error codes** —
+they remain the supported fallback when no inline `response_text` is present. Do NOT
+delete them.
 
 ---
 
@@ -174,8 +204,8 @@ Four edits, all threading two new fields through paths that already carry
 type ApplyChatResponseMessage = {
   action: 'apply-chat-response'
   client_id: number
-  request_id?: string        // NEW
-  response_text?: string     // NEW
+  request_id?: string // NEW
+  response_text?: string // NEW
   raw_instructions?: string
   edit_format?: string
   url?: string
@@ -205,7 +235,7 @@ the extension just wrote, and include `request_id` + `response_text`:
 ```ts
 export function add_apply_response_button(params: {
   client_id: number
-  request_id?: string          // NEW
+  request_id?: string // NEW
   raw_instructions?: string
   edit_format?: string
   footer: Element
@@ -219,7 +249,7 @@ export function add_apply_response_button(params: {
   apply_response_button.addEventListener('click', async () => {
     set_button_disabled_state(apply_response_button)
     requestAnimationFrame(async () => {
-      await params.perform_copy(params.footer)          // existing: writes clipboard
+      await params.perform_copy(params.footer) // existing: writes clipboard
       await new Promise((resolve) => setTimeout(resolve, 500))
 
       // NEW: read back what perform_copy just copied (allowed within this click gesture)
@@ -227,14 +257,14 @@ export function add_apply_response_button(params: {
       try {
         response_text = await navigator.clipboard.readText()
       } catch {
-        response_text = undefined   // fall back to MCP-side clipboard read
+        response_text = undefined // fall back to MCP-side clipboard read
       }
 
       browser.runtime.sendMessage<Message>({
         action: 'apply-chat-response',
         client_id: params.client_id,
-        request_id: params.request_id,                  // NEW
-        response_text,                                  // NEW
+        request_id: params.request_id, // NEW
+        response_text, // NEW
         raw_instructions: params.raw_instructions,
         edit_format: params.edit_format,
         url: window.location.href
@@ -276,11 +306,11 @@ gains the same two optional fields (Step 6 already adds them to
 
 ## Part 4 — Backward compatibility (nothing forced to upgrade)
 
-| Sender → Receiver | Behavior |
-| --- | --- |
-| New browser → New MCP server | `response_text` used; clipboard never touched. ✅ goal |
-| Old browser → New MCP server | no `response_text` → MCP falls back to its V0 clipboard read. ✅ |
-| New browser → real VS Code extension | extra optional fields ignored; existing flow intact. ✅ |
+| Sender → Receiver                    | Behavior                                                         |
+| ------------------------------------ | ---------------------------------------------------------------- |
+| New browser → New MCP server         | `response_text` used; clipboard never touched. ✅ goal           |
+| Old browser → New MCP server         | no `response_text` → MCP falls back to its V0 clipboard read. ✅ |
+| New browser → real VS Code extension | extra optional fields ignored; existing flow intact. ✅          |
 
 So you can ship the browser change and the server change independently.
 
@@ -293,8 +323,11 @@ So you can ship the browser change and the server change independently.
 ```ts
 test('Phase C: response_text is used directly, clipboard untouched', async () => {
   let clipboard_reads = 0
-  const read_clipboard = async () => { clipboard_reads++; return 'should-not-matter' }
-  const transport = new FakeTransport()             // emits apply with response_text
+  const read_clipboard = async () => {
+    clipboard_reads++
+    return 'should-not-matter'
+  }
+  const transport = new FakeTransport() // emits apply with response_text
   const runner = new PromptRunner(transport, read_clipboard)
 
   transport.onNextInitialize((msg) => {
@@ -316,13 +349,18 @@ test('Phase C: response_text is used directly, clipboard untouched', async () =>
 
 ```ts
 test('Phase C: no response_text -> clipboard fallback (V0 path)', async () => {
-  const seq = ['OLD', 'NEW FROM CLIPBOARD']; let i = 0
+  const seq = ['OLD', 'NEW FROM CLIPBOARD']
+  let i = 0
   const read_clipboard = async () => seq[Math.min(i++, seq.length - 1)]
   const transport = new FakeTransport()
   const runner = new PromptRunner(transport, read_clipboard)
 
   transport.onNextInitialize((msg) => {
-    transport.emitApply({ action: 'apply-chat-response', client_id: msg.client_id, request_id: msg.request_id })
+    transport.emitApply({
+      action: 'apply-chat-response',
+      client_id: msg.client_id,
+      request_id: msg.request_id
+    })
   })
 
   const text = await runner.send({ url: 'https://claude.ai/new', text: 'hi' })
@@ -362,9 +400,10 @@ extraction proves more reliable.
 [ ] Add request_id + response_text (optional) to @shared + MCP protocol types.
 [ ] PromptRunner: generate request_id, match on it, prefer response_text, keep clipboard fallback.
 [ ] Browser: thread request_id (storage -> observer -> button); read clipboard in the click; forward both fields in background.
-[ ] Tests: inline-response (no clipboard) + back-compat fallback.
-[ ] Demo: prompt -> Apply -> tool returns text with the OS clipboard untouched (verify by putting junk on the clipboard first).
-[ ] Once stable: delete clipboard read, clipboardy dep, and the two clipboard error codes.
+[ ] Tests: inline-response path + clipboard fallback path (both supported).
+[ ] Demo: prompt -> Apply -> tool returns text via inline response_text (optional capability check).
+[ ] KEEP the clipboard read, clipboardy dep, and clipboard error codes — clipboard
+    remains a supported path. (Do NOT delete them.)
 ```
 
 **Definition of done:** put unrelated junk on your OS clipboard, run a prompt,

@@ -29,18 +29,18 @@ Zed AI finishes → commit to draft branch → gather packet (repo/branch/SHA/fi
 
 ## Steps (build top to bottom)
 
-| Step | File | What |
-| --- | --- | --- |
-| Pre | depends on | host-mode server built + browser extension + GitHub-connected ChatGPT project |
-| 1 | [`01-step-register-server-in-zed.md`](01-step-register-server-in-zed.md) | Register `cwc-mcp-server --mode host` in Zed; confirm tools |
-| 2 | [`02-step-prompt-pack.md`](02-step-prompt-pack.md) | The 4 templates + the fill helper |
-| 3 | [`03-step-gather-handoff-packet.md`](03-step-gather-handoff-packet.md) | Collect repo/branch/SHA/files into a packet (git) |
-| 4 | [`04-step-send-review-request.md`](04-step-send-review-request.md) | Fill prompt + `send_to_codewebchat` + `poll_cwc_response` |
-| 5 | [`05-step-import-review-into-zed.md`](05-step-import-review-into-zed.md) | Parse verdict/findings/JSON; drive the fix pass |
-| 6 | [`06-step-sha-match-safety.md`](06-step-sha-match-safety.md) | Refuse/warn if branch HEAD drifted from the reviewed SHA |
-| 7 | [`07-step-fallback.md`](07-step-fallback.md) | Manual-copy fallback when transport fails |
-| 8 | [`08-step-mvp-demo-checklist.md`](08-step-mvp-demo-checklist.md) | End-to-end acceptance demo |
-| v1 | [`09-step-v1-dedicated-tools.md`](09-step-v1-dedicated-tools.md) | Promote to `prepare_review_handoff` / `request_review` / `import_review_feedback` |
+| Step | File                                                                     | What                                                                              |
+| ---- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| Pre  | depends on                                                               | host-mode server built + browser extension + GitHub-connected ChatGPT project     |
+| 1    | [`01-step-register-server-in-zed.md`](01-step-register-server-in-zed.md) | Register `cwc-mcp-server --mode host` in Zed; confirm tools                       |
+| 2    | [`02-step-prompt-pack.md`](02-step-prompt-pack.md)                       | The 4 templates + the fill helper                                                 |
+| 3    | [`03-step-gather-handoff-packet.md`](03-step-gather-handoff-packet.md)   | Collect repo/branch/SHA/files into a packet (git)                                 |
+| 4    | [`04-step-send-review-request.md`](04-step-send-review-request.md)       | Fill prompt + `send_to_codewebchat` + `poll_cwc_response`                         |
+| 5    | [`05-step-import-review-into-zed.md`](05-step-import-review-into-zed.md) | Parse verdict/findings/JSON; drive the fix pass                                   |
+| 6    | [`06-step-sha-match-safety.md`](06-step-sha-match-safety.md)             | Refuse/warn if branch HEAD drifted from the reviewed SHA                          |
+| 7    | [`07-step-fallback.md`](07-step-fallback.md)                             | Manual-copy fallback when transport fails                                         |
+| 8    | [`08-step-mvp-demo-checklist.md`](08-step-mvp-demo-checklist.md)         | End-to-end acceptance demo                                                        |
+| v1   | [`09-step-v1-dedicated-tools.md`](09-step-v1-dedicated-tools.md)         | Promote to `prepare_review_handoff` / `request_review` / `import_review_feedback` |
 
 ## Where to start
 
@@ -51,6 +51,7 @@ proves the ChatGPT review quality before you invest in the flow.
 ## How this relates to the other plan
 
 `plans/mcp-server-prototype-plan/` (Phases 0/A/B done, T.3 done) is the
-foundation. The only re-prioritization: **Phase C (drop the clipboard)** moves up,
-because review replies are long structured text that you want returned intact
-(Step 5 notes where Phase C plugs in).
+foundation. Re-prioritization: add an **inline `response_text` reply option**
+(reframed "Phase C") so long structured review replies can return intact — **as an
+addition; clipboard support is retained** as a first-class path, not removed
+(Step 5 notes where the inline option plugs in).

@@ -41,7 +41,8 @@ For the Node MCP server (no bundler), confirm the equivalent: either
 [ ] MCP server connected (backend context) and extension client connected.
 [ ] MCP inserts a chat_requests row → extension's subscription fires.
 [ ] Extension drives the chatbot, captures reply, inserts chat_responses row.
-[ ] MCP's subscription returns response_text. No clipboard, no port 55155.
+[ ] MCP's subscription returns the reply (inline response_text or clipboard — both
+    supported), no port 55155.
 [ ] Kill the network/internet — local loop still works (it's all localhost).
 ```
 
@@ -52,25 +53,28 @@ That last line is the whole point: **local communication needs no internet.**
 Same schema, same insert/subscribe code. Change two things:
 
 ### R1. `serverUrl`
+
 - Jazz Cloud: `https://v2.sync.jazz.tools/` (get an `appId` from Jazz Cloud).
 - Self-hosted remote edge: run the server with `--upstream-url` (edge→core), point
   `serverUrl` at it.
 
 ### R2. Auth (production)
+
 Local-first auth is fine for local/solo; for remote multi-user, switch to
 **external JWT**: run the sync server with `--jwks-url` (or `--jwt-public-key`),
 have each peer pass `jwtToken`. The MCP server backend uses `jwksUrl` on
-`createJazzContext`. (Your research report's auth matrix recommends *external JWT +
-short-lived backend-minted tokens*.)
+`createJazzContext`. (Your research report's auth matrix recommends _external JWT +
+short-lived backend-minted tokens_.)
 
 ### R3. "Prefer local" switch
+
 A single config selects the transport/target:
 
 ```ts
 const target =
   config.jazz_mode === 'remote'
     ? { serverUrl: REMOTE_URL, auth: 'jwt' }
-    : { serverUrl: 'ws://localhost:1625', auth: 'local-first' }  // default
+    : { serverUrl: 'ws://localhost:1625', auth: 'local-first' } // default
 ```
 
 Local is the default; remote is opt-in. If the local sync server isn't reachable,
@@ -94,12 +98,12 @@ you may fall back to remote, or to the legacy WS bridge (see rollback).
 
 ## Config summary
 
-| Concern | Local (default) | Remote |
-| --- | --- | --- |
-| `serverUrl` | `ws://localhost:1625` | `https://v2.sync.jazz.tools/` or self-hosted edge |
-| Auth | local-first (`secret`) | external JWT (`jwtToken` + JWKS) |
-| Internet required | no | yes |
-| Sync server | self-hosted localhost (own/child process) | Jazz Cloud or remote edge |
-| Durability tier for "sent" | `local` (instant) | `edge` (confirm it left the device) |
-| Clipboard | removed (row carries text) | removed |
-| WS bridge / 55155 | fallback only | fallback only |
+| Concern                    | Local (default)                                          | Remote                                            |
+| -------------------------- | -------------------------------------------------------- | ------------------------------------------------- |
+| `serverUrl`                | `ws://localhost:1625`                                    | `https://v2.sync.jazz.tools/` or self-hosted edge |
+| Auth                       | local-first (`secret`)                                   | external JWT (`jwtToken` + JWKS)                  |
+| Internet required          | no                                                       | yes                                               |
+| Sync server                | self-hosted localhost (own/child process)                | Jazz Cloud or remote edge                         |
+| Durability tier for "sent" | `local` (instant)                                        | `edge` (confirm it left the device)               |
+| Clipboard                  | retained as fallback (row carries text as inline option) | retained as fallback                              |
+| WS bridge / 55155          | fallback only                                            | fallback only                                     |

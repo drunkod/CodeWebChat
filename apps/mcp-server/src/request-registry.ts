@@ -166,7 +166,10 @@ export class RequestRegistry {
     }
     this.transport.sendInitializeChat(message)
     const apply = await apply_promise
-    if (typeof apply.response_text === 'string') {
+    if (
+      typeof apply.response_text === 'string' &&
+      apply.response_text.trim().length > 0
+    ) {
       return apply.response_text
     }
 

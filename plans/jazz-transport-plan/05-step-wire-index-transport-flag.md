@@ -1,13 +1,15 @@
-# Step 5 — Wire `index.ts`: `--transport jazz|ws`, spawn server, drop clipboard
+# Step 5 — Wire `index.ts`: `--transport jazz|ws`, spawn server, prefer inline reply (clipboard retained)
 
-Select the transport at startup, spawn the local sync server when `jazz`, and make
-the **reply text come from the response row instead of the clipboard**.
+Select the transport at startup, spawn the local sync server when `jazz`, and let
+the **reply text come from the response row when available, falling back to the
+clipboard**. Clipboard support is **kept**, not removed.
 
-## 5.1 The clipboard problem (and the clean fix)
+## 5.1 Inline reply + clipboard fallback (both supported)
 
-`RequestRegistry.run()` currently reads the OS clipboard after `apply`. With Jazz
-the reply is already in the apply message (`response_text`). Add an optional field
-to the apply message and have the registry prefer it.
+`RequestRegistry.run()` reads the OS clipboard after `apply`. With Jazz the reply
+may already be in the apply message (`response_text`). Add an optional field to the
+apply message and have the registry **prefer it when present, otherwise fall back
+to the clipboard** (controlled by `use_clipboard_fallback`, default `true`).
 
 ### 5.2 Protocol: optional `response_text` on the apply message
 
@@ -18,7 +20,7 @@ export type ApplyChatResponseMessage = {
   action: 'apply-chat-response'
   client_id: number
   request_id?: string
-  response_text?: string   // NEW: reply carried inline (Jazz transport sets this)
+  response_text?: string // NEW: reply carried inline (Jazz transport sets this)
   raw_instructions?: string
   edit_format?: string
   url?: string
@@ -53,7 +55,7 @@ this.apply_handler({
   action: 'apply-chat-response',
   client_id,
   request_id: row.request_id,
-  response_text: row.response_text   // ← the reply, straight from the Jazz row
+  response_text: row.response_text // ← the reply, straight from the Jazz row
 })
 ```
 
@@ -104,7 +106,9 @@ const instructions = `${CWC_MCP_INSTRUCTIONS} ${channel}`
 transport on shutdown:
 
 ```ts
-const shutdown = async () => { await cwcTransport.close().catch(() => {}) }
+const shutdown = async () => {
+  await cwcTransport.close().catch(() => {})
+}
 process.once('SIGINT', shutdown)
 process.once('SIGTERM', shutdown)
 ```

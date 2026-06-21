@@ -93,6 +93,7 @@ If any RED FLAG trips: the reviewer is guessing. **Fix the preconditions
 When 8.2 passes, Review Handoff v0 is real: Zed → GitHub-connected ChatGPT review
 → feedback into Zed, with no VS Code and no new server code. Next:
 
-1. **Re-prioritize Phase C** (drop the clipboard) for clean review-text return.
+1. **Add the inline `response_text` reply option** (reframed "Phase C") for clean
+   review-text return — _in addition to_ the retained clipboard path (not a removal).
 2. Promote to **v1 dedicated tools** (`09-step-v1-dedicated-tools.md`).
 3. Tune prompts and add review-focus presets as one-click options.

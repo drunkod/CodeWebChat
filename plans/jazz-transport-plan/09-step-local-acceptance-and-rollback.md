@@ -26,16 +26,20 @@ nix develop path:/Users/test/Documents/work/CodeWebChat --command pnpm -r build
 [ ] Extension subscription fires → opens chatbot, fills prompt.
 [ ] Reply captured as text → extension inserts chat_responses(response_text).
 [ ] MCP server's subscription routes it → tool returns the text.
-[ ] NO OS clipboard involved: put junk on the clipboard first; the tool still
-    returns the real reply (proves the row carries it).
+[ ] Reply returns correctly via the Jazz path (clipboard capture OR inline
+    response_text — both are acceptable; clipboard is retained).
+[ ] (Optional inline-mode check) With use_clipboard_fallback=false and an inline
+    response_text, the reply still returns. This is a capability check, NOT a
+    requirement — clipboard mode stays supported.
 [ ] NO port 55155 / WS relay used (it's the fallback, not this path).
 [ ] Pull the network/internet — the whole loop still works (all localhost).
 [ ] Kill the extension service worker mid-request; on restart the subscription
     replays the pending row and the request completes.
 ```
 
-The "junk on the clipboard" and "pull the network" checks are the two that prove
-the *value*: clipboard-free and truly local.
+The "pull the network" check proves the core value: truly local. The reply may
+arrive via clipboard or inline row — clipboard support is intentionally kept, so a
+"clipboard-free" run is an optional capability demo, not an acceptance gate.
 
 ## 9.3 Flip the default (only after green)
 
@@ -58,12 +62,14 @@ are transport-agnostic, neither side of the rollback touches business logic.
 ## 9.5 Update the task lists
 
 - Mark the Jazz path "validated (local)" here.
-- Note that **Phase C (clipboard removal)** in `plans/mcp-server-prototype-plan` is
-  now satisfied by the Jazz transport for the `jazz` path (the `ws` path still uses
-  the clipboard).
+- Note that the Jazz transport adds an **inline reply option** (`response_text` in
+  the row) **alongside** the retained clipboard path. This is additive — "Phase C"
+  is reframed as "inline reply is now available," not "clipboard removed." Clipboard
+  stays supported on both the `ws` and `jazz` paths.
 
 ## Done when
 
-- The full checklist passes, including clipboard-junk and network-off.
+- The full checklist passes (reply returns via clipboard or inline row; network-off
+  still works). The clipboard-free run is an optional capability demo, not required.
 - Default transport flipped to `jazz` (or documented as opt-in), with `ws` rollback
   proven.

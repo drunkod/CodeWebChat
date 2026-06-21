@@ -1,7 +1,7 @@
 # Review Handoff — MVP plan, roadmap, and how it changes our existing plans
 
 Companion to `00-overview-and-user-stories.md`. This is the build plan: a lean
-MVP that does *exactly* your story, then a universal phase.
+MVP that does _exactly_ your story, then a universal phase.
 
 ## Guiding principle
 
@@ -18,21 +18,21 @@ Goal: in Zed, after the AI finishes, one command sends a structured review
 request to the ChatGPT page and returns the review into Zed.
 
 The big realization: **the MVP may need almost no new server code.** Zed supports
-MCP, so Zed's agent can call the *existing* `send_to_codewebchat` / `poll_cwc_response`
+MCP, so Zed's agent can call the _existing_ `send_to_codewebchat` / `poll_cwc_response`
 with a handoff prompt it builds from a template. So MVP = wiring + prompt pack +
 a thin "prepare" helper.
 
 ### MVP scope
 
-| Step | What | Reuses | New |
-| --- | --- | --- | --- |
-| M1 | Run `cwc-mcp-server --mode host`; register it as an MCP server in Zed (`settings.json` → context servers). | host-mode server (done) | Zed config + a short setup doc |
-| M2 | Prompt pack: reviewer system prompt, handoff prompt, feedback-back prompt, JSON variant — as reusable templates. | research prompts | `docs/.../prompts/*.md` |
-| M3 | "Prepare handoff" helper that fills the packet (`repo, base, draft, commit_sha, title, summary, changed_files, review_focus`). MVP: Zed's agent gathers it via its Git tools, OR a tiny `prepare_review_handoff` MCP tool. | `git-repository-utils.ts`, `commit-files-source.ts`, `prompts-for-commit-messages-utils.ts` | thin tool/skill |
-| M4 | Send: agent calls `send_to_codewebchat` with the built prompt + `url: https://chatgpt.com/...` (the project page) → `poll_cwc_response` until done. | existing tools | nothing |
-| M5 | Return: the review text lands in the Zed agent thread; if JSON requested, the agent parses verdict/findings. | existing return path (clipboard for now) | parse helper |
-| M6 | Safety: SHA-match check — record the reviewed `commit_sha`; warn if branch HEAD moved before applying feedback. | — | small check |
-| M7 | Fallback: if send/poll fails, print the copyable handoff payload. | error codes | message |
+| Step | What                                                                                                                                                                                                                       | Reuses                                                                                      | New                            |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------ |
+| M1   | Run `cwc-mcp-server --mode host`; register it as an MCP server in Zed (`settings.json` → context servers).                                                                                                                 | host-mode server (done)                                                                     | Zed config + a short setup doc |
+| M2   | Prompt pack: reviewer system prompt, handoff prompt, feedback-back prompt, JSON variant — as reusable templates.                                                                                                           | research prompts                                                                            | `docs/.../prompts/*.md`        |
+| M3   | "Prepare handoff" helper that fills the packet (`repo, base, draft, commit_sha, title, summary, changed_files, review_focus`). MVP: Zed's agent gathers it via its Git tools, OR a tiny `prepare_review_handoff` MCP tool. | `git-repository-utils.ts`, `commit-files-source.ts`, `prompts-for-commit-messages-utils.ts` | thin tool/skill                |
+| M4   | Send: agent calls `send_to_codewebchat` with the built prompt + `url: https://chatgpt.com/...` (the project page) → `poll_cwc_response` until done.                                                                        | existing tools                                                                              | nothing                        |
+| M5   | Return: the review text lands in the Zed agent thread; if JSON requested, the agent parses verdict/findings.                                                                                                               | existing return path (clipboard for now)                                                    | parse helper                   |
+| M6   | Safety: SHA-match check — record the reviewed `commit_sha`; warn if branch HEAD moved before applying feedback.                                                                                                            | —                                                                                           | small check                    |
+| M7   | Fallback: if send/poll fails, print the copyable handoff payload.                                                                                                                                                          | error codes                                                                                 | message                        |
 
 ### MVP acceptance (the demo)
 
@@ -44,6 +44,7 @@ a thin "prepare" helper.
 5. If you've committed again since, the app warns the review may be stale.
 
 ### What the MVP deliberately defers
+
 Auto-applying patches from the reply; bidirectional session sync; a custom Zed
 panel/webview (Zed's extension model doesn't offer arbitrary webviews — MCP is the
 supported surface); multi-reviewer fan-out; full ACP agent.
@@ -55,10 +56,11 @@ supported surface); multi-reviewer fan-out; full ACP agent.
 The `plans/mcp-server-prototype-plan/` work stays valid — it's the foundation —
 with these adjustments:
 
-1. **Re-prioritize Phase C (drop the clipboard).** For review replies (long,
-   structured), inline `response_text` matters more than for short prompts. Move
-   Phase C up: it's the cleanest return path for reviews. (Plan: `06b`.)
-2. **Target chatbot = ChatGPT.** Default `url` to the user's ChatGPT *project*
+1. **Re-prioritize Phase C (add the inline reply option; clipboard retained).** For
+   review replies (long, structured), inline `response_text` matters more than for
+   short prompts. Move Phase C up: it's the cleanest return path for reviews — added
+   _alongside_ the retained clipboard fallback, not as a replacement. (Plan: `06b`.)
+2. **Target chatbot = ChatGPT.** Default `url` to the user's ChatGPT _project_
    page (GitHub-connected), not a fresh chat. Confirm `apps/browser`'s ChatGPT
    integration (`chatbots/chatgpt.ts`) injects the prompt into the project page
    correctly. `prompt_type: 'edit-context'` already triggers the Apply button.
@@ -89,7 +91,7 @@ Once the loop is reliable, generalize:
     (verdict/findings/tests/patch_plan).
 - **Git automation:** auto-create the `draft/...` branch, commit with an
   AI-generated message (reuse `prompts-for-commit-messages-utils.ts`), push, and
-  resolve the *remote* HEAD SHA (the research's top finding: confirm push before
+  resolve the _remote_ HEAD SHA (the research's top finding: confirm push before
   reviewing stale code).
 - **Review-mode presets** (bug-risk / architecture / tests / merge-readiness) as
   structured tool input, reusing the editor "Configurations/presets" concept.
@@ -97,7 +99,8 @@ Once the loop is reliable, generalize:
   document each client's MCP config.
 - **Multi-reviewer fan-out & compare** (Claude + Gemini + ChatGPT) using the
   existing multi-chatbot integrations.
-- **Phase C complete** → clipboard fully removed from the return path.
+- **Phase C complete** → inline `response_text` available as the preferred return
+  path, with the clipboard retained as a fallback.
 - **Round-trip to a Zed task list** from `editor_patch_plan`.
 
 ---
@@ -114,7 +117,8 @@ Once the loop is reliable, generalize:
   phase below.
 
 ## Other decisions to confirm
-2. **ChatGPT target page:** a persistent ChatGPT *project* URL with the repo
+
+2. **ChatGPT target page:** a persistent ChatGPT _project_ URL with the repo
    connected (so each review reuses the connected GitHub context). Confirm the URL
    shape and that the browser integration fills it.
 3. **Return format:** ask the reviewer for prose **plus** the JSON block from the

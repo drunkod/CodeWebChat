@@ -7,7 +7,7 @@ surface verdict/findings, and drive the fix pass with the feedback-back prompt.
 
 `scripts/review-handoff/parse-review.mjs`:
 
-```js
+````js
 #!/usr/bin/env node
 // Usage: node parse-review.mjs < review.txt   (reads the poll "response" text)
 import { readFileSync } from 'node:fs'
@@ -34,10 +34,12 @@ const out = {
   risk: review.risk ?? 'unknown',
   findings: Array.isArray(review.findings) ? review.findings : [],
   tests: Array.isArray(review.tests) ? review.tests : [],
-  editor_patch_plan: Array.isArray(review.editor_patch_plan) ? review.editor_patch_plan : []
+  editor_patch_plan: Array.isArray(review.editor_patch_plan)
+    ? review.editor_patch_plan
+    : []
 }
 process.stdout.write(JSON.stringify(out, null, 2))
-```
+````
 
 Run:
 
@@ -48,13 +50,13 @@ node scripts/review-handoff/parse-review.mjs < review.txt > review.json
 
 ## 5.2 Map to Zed actions
 
-| Field | What to do in Zed |
-| --- | --- |
-| `verdict` | gate: `pass`/`pass_with_minor_changes` → optional; `needs_changes`/`blocked` → fix pass |
-| `risk` | display; `high` → don't auto-anything, review manually |
-| `findings[]` | each `{severity, path, title, recommended_fix}` → an inline task / TODO |
-| `tests[]` | queue as test tasks |
-| `editor_patch_plan[]` | becomes the ordered Zed agent task list |
+| Field                 | What to do in Zed                                                                       |
+| --------------------- | --------------------------------------------------------------------------------------- |
+| `verdict`             | gate: `pass`/`pass_with_minor_changes` → optional; `needs_changes`/`blocked` → fix pass |
+| `risk`                | display; `high` → don't auto-anything, review manually                                  |
+| `findings[]`          | each `{severity, path, title, recommended_fix}` → an inline task / TODO                 |
+| `tests[]`             | queue as test tasks                                                                     |
+| `editor_patch_plan[]` | becomes the ordered Zed agent task list                                                 |
 
 ## 5.3 Drive the fix pass (feedback-back prompt)
 
@@ -70,14 +72,15 @@ Suggested tests: {{tests}}
 Instructions: fix blocking first; preserve intent; smallest coherent patch; then summarize.
 ```
 
-## 5.4 Where Phase C plugs in
+## 5.4 Where the inline reply option (reframed "Phase C") plugs in — clipboard retained
 
-Today the review text returns via the OS clipboard (Apply → clipboard → `poll`).
-For long structured reviews this is the fragile part. **Phase C**
-(`plans/mcp-server-prototype-plan/06b`) makes the browser send `response_text`
-inline, so Step 4's `done.response` is the review directly — no clipboard. When
-you do Phase C, this step is unchanged except it gets cleaner, complete text every
-time. That's why Phase C is now higher priority for this product.
+Today the review text returns via the OS clipboard (Apply → clipboard → `poll`),
+which stays fully supported. The **inline reply option** (reframed "Phase C",
+`plans/mcp-server-prototype-plan/06b`) lets the browser _also_ send `response_text`
+inline, so Step 4's `done.response` can be the review directly. The registry prefers
+inline `response_text` when present and **falls back to the clipboard** — this step
+is unchanged either way; inline just gives cleaner, complete text for long reviews.
+Clipboard support is retained, not removed.
 
 ## Done when
 

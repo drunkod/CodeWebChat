@@ -30,7 +30,8 @@ it with `nix develop path:/Users/test/Documents/work/CodeWebChat --command which
       "command": "/nix/store/<hash>-nodejs-22.x/bin/node",
       "args": [
         "/Users/test/Documents/work/CodeWebChat/apps/mcp-server/dist/index.js",
-        "--mode", "host"
+        "--mode",
+        "host"
       ],
       "env": {}
     }
@@ -53,16 +54,16 @@ extension, then ask the agent to call `cwc_status` → expect
 
 After committing to a draft branch, have the Zed agent collect:
 
-| Field | How (Zed agent / terminal) |
-| --- | --- |
-| `repo_name` | `git remote get-url origin` (owner/repo) |
-| `base_branch` | your main branch (e.g. `main`) |
-| `draft_branch` | `git rev-parse --abbrev-ref HEAD` (e.g. `draft/<slug>`) |
-| `commit_sha` | `git rev-parse HEAD` (after push: the **remote** HEAD) |
-| `commit_title` | `git log -1 --pretty=%s` |
+| Field            | How (Zed agent / terminal)                                      |
+| ---------------- | --------------------------------------------------------------- |
+| `repo_name`      | `git remote get-url origin` (owner/repo)                        |
+| `base_branch`    | your main branch (e.g. `main`)                                  |
+| `draft_branch`   | `git rev-parse --abbrev-ref HEAD` (e.g. `draft/<slug>`)         |
+| `commit_sha`     | `git rev-parse HEAD` (after push: the **remote** HEAD)          |
+| `commit_title`   | `git log -1 --pretty=%s`                                        |
 | `change_summary` | the AI's summary of what it changed (or generate from the diff) |
-| `changed_files` | `git diff --name-only {{base_branch}}...HEAD` |
-| `review_focus` | pick a preset (see `prompts/` table) |
+| `changed_files`  | `git diff --name-only {{base_branch}}...HEAD`                   |
+| `review_focus`   | pick a preset (see `prompts/` table)                            |
 
 > Important (research's top finding): **push first, then read the remote HEAD SHA**
 > so the reviewer inspects the code that's actually on GitHub, not a local commit
@@ -97,6 +98,7 @@ comes back to Zed.
 ## M5 — Bring the review into Zed
 
 The returned text contains the prose review **and** the JSON block. The agent:
+
 - shows the prose in the thread, and
 - parses the JSON (`verdict`, `risk`, `findings[]`, `tests[]`,
   `editor_patch_plan[]`) into actionable items.
@@ -137,4 +139,4 @@ it into the ChatGPT page by hand. The loop must never be blocked by the transpor
 
 That round-trip = Review Handoff v0. Once it feels good, we promote the
 `prepare_review_handoff` / `request_review` / `import_review_feedback` tools (v1)
-and re-prioritize Phase C to drop the clipboard from the return path.
+and re-prioritize Phase C to add an inline reply path (clipboard retained as fallback).

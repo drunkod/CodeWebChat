@@ -20,11 +20,13 @@ Jazz v2 is **"the database that syncs"** — a local-first relational store wher
   **tiers: Local → Edge (sync server) → Global**.
 
 So two processes "communicate" by **writing rows to a shared table and
-subscribing to it** — there is no bespoke socket protocol and no clipboard.
+subscribing to it** — no bespoke socket protocol required, and the reply can ride
+inline in the row. (Clipboard support is retained as an additional capture path.)
 
 ## The core idea: rows replace the bridge AND the clipboard
 
 Today:
+
 ```
 MCP server ──WS initialize-chat──▶ [relay :55155] ──▶ extension ──drives chatbot──▶ Apply
                                                        extension copies reply to OS clipboard
@@ -32,16 +34,18 @@ MCP server ◀──WS apply-chat-response (signal only)── extension ; MCP r
 ```
 
 With Jazz:
+
 ```
 MCP server ──db.insert(chat_requests,{request_id,url,text})──▶ [Jazz sync server] ──sync──▶ extension
    extension subscribes chat_requests(status='pending') → drives chatbot → gets reply text
 MCP server ◀── subscribes chat_responses(request_id) ◀── extension db.insert(chat_responses,{request_id, response_text})
 ```
 
-The reply text travels **inside a Jazz row** (`response_text`), so the OS
-clipboard disappears from the design entirely — this is the clean version of
-"Phase C" (drop the clipboard), achieved by changing the transport, not by
-scraping the clipboard faster.
+The reply text **can** travel inside a Jazz row (`response_text`) as an inline
+option — this is the clean version of "Phase C," reframed as _adding_ an inline
+reply path. **Clipboard support is retained**, not removed: the registry prefers an
+inline `response_text` when present and falls back to the clipboard, and the WS path
+keeps using the clipboard as before.
 
 ## Local-first, then remote — what "local" means here
 
@@ -74,9 +78,9 @@ an opt-in for cross-machine/cross-network use. The only differences are
 ## The honest tradeoff (from the research report)
 
 Your research report recommends Jazz for **durable state/intent** (preferences,
-hosts, audit rows) and keeping a *separate* transport for raw RPC, because
+hosts, audit rows) and keeping a _separate_ transport for raw RPC, because
 modeling every request as a synced row adds sync latency vs. a direct socket. You
-asked for "**all of this using Jazz**" — i.e. Jazz *as* the channel — which is a
+asked for "**all of this using Jazz**" — i.e. Jazz _as_ the channel — which is a
 deliberate, valid choice: it buys one mechanism, offline tolerance, row history
 (audit), permissions, and identical local/remote code, at the cost of tuning
 durability tiers so an interactive request feels instant. For a local sync server
