@@ -14,32 +14,60 @@ type StartLocalJazzServer = (opts: Record<string, unknown>) => Promise<{
   stop: () => Promise<void>
 }>
 
-async function loadStartLocalJazzServer(): Promise<StartLocalJazzServer> {
-  const mod = (await import('jazz-tools/dev')) as {
-    startLocalJazzServer?: StartLocalJazzServer
+type PushSchemaCatalogue = (opts: {
+  appId: string
+  serverUrl: string
+  adminSecret: string
+  schemaDir: string
+}) => Promise<void>
+
+async function loadJazzDev(): Promise<{
+  startLocalJazzServer: StartLocalJazzServer
+  pushSchemaCatalogue: PushSchemaCatalogue
+}> {
+  const mod = (await import('jazz-tools/dev')) as any
+  if (!mod.startLocalJazzServer || !mod.pushSchemaCatalogue) {
+    throw new Error('jazz-tools/dev does not export required functions')
   }
-  if (!mod.startLocalJazzServer) {
-    throw new Error('jazz-tools/dev does not export startLocalJazzServer')
+  return {
+    startLocalJazzServer: mod.startLocalJazzServer,
+    pushSchemaCatalogue: mod.pushSchemaCatalogue
   }
-  return mod.startLocalJazzServer
 }
 
 export async function startSyncServer(
   config: JazzConfig
 ): Promise<SyncServerHandle> {
-  const startLocalJazzServer = await loadStartLocalJazzServer()
+  const { startLocalJazzServer } = await loadJazzDev()
   const server = await startLocalJazzServer({
     appId: config.appId,
     port: config.port,
     dataDir: config.dataDir,
+    backendSecret: config.backendSecret ?? 'cwc-default-backend-secret',
+    adminSecret: config.adminSecret ?? 'cwc-default-admin-secret',
     enableLogs: process.env.JAZZ_DEBUG === '1'
   })
+
   return {
     url: server.url,
     port: server.port,
     appId: server.appId,
     stop: server.stop
   }
+}
+
+export async function pushSchema(config: JazzConfig, serverUrl: string): Promise<void> {
+  const { pushSchemaCatalogue } = await loadJazzDev()
+  const schemaDir = new URL(
+    '../../../packages/shared/src/jazz',
+    import.meta.url
+  ).pathname
+  await pushSchemaCatalogue({
+    appId: config.appId,
+    serverUrl,
+    adminSecret: config.adminSecret ?? 'cwc-default-admin-secret',
+    schemaDir
+  })
 }
 
 export async function startSyncServerSafe(
@@ -74,6 +102,7 @@ export async function ensureSyncServer(
     return null
   }
   const handle = await startSyncServerSafe(config)
+  await pushSchema(config, handle.url)
   registerSyncServerShutdown(handle)
   return handle
 }

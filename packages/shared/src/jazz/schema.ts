@@ -10,14 +10,14 @@ const schemaDef = {
     text: s.string(),
     prompt_type: s.string(),
     status: s.string(), // 'pending' | 'claimed' | 'done' | 'failed'
-    created_at: s.int() // Date.now()
+    created_at: s.float() // Date.now()
   }),
   chat_responses: s.table({
     request_id: s.string(),
     response_text: s.string(),
     status: s.string(), // 'done' | 'error'
     error: s.string().optional(),
-    created_at: s.int()
+    created_at: s.float()
   })
 }
 

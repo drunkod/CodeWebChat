@@ -41,7 +41,7 @@ export async function getJazzBrowserSettings(): Promise<JazzBrowserSettings> {
       : DEFAULT_SERVER_URL
 
   let secret =
-    typeof got[SECRET_KEY] === 'string' && got[SECRET_KEY].length >= 64
+    typeof got[SECRET_KEY] === 'string' && got[SECRET_KEY].length >= 43
       ? got[SECRET_KEY]
       : ''
 

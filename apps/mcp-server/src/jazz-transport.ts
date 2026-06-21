@@ -7,6 +7,7 @@ import type {
 } from './protocol.js'
 import type { JazzConfig } from './jazz-config.js'
 import { app } from '../../../packages/shared/dist/jazz/schema.js'
+import permissions from '../../../packages/shared/dist/jazz/permissions.js'
 import type {
   ChatRequestInsert,
   ChatResponseRow
@@ -150,10 +151,12 @@ async function defaultMakeDb(config: JazzConfig): Promise<JazzDb> {
     createJazzContext: (options: {
       appId: string
       app: typeof app
-      permissions: Record<string, never>
+      permissions: unknown
       serverUrl: string
       allowLocalFirstAuth: boolean
-      driver: { type: 'memory' }
+      backendSecret: string
+      adminSecret?: string
+      driver: { type: 'persistent'; dataPath: string } | { type: 'memory' }
     }) => {
       asBackend: () => JazzDb
     }
@@ -162,10 +165,12 @@ async function defaultMakeDb(config: JazzConfig): Promise<JazzDb> {
   const context = backendModule.createJazzContext({
     appId: config.appId,
     app,
-    permissions: {},
+    permissions,
     serverUrl: config.serverUrl,
     allowLocalFirstAuth: true,
-    driver: { type: 'memory' }
+    backendSecret: config.backendSecret ?? 'cwc-default-backend-secret',
+    adminSecret: config.adminSecret ?? 'cwc-default-admin-secret',
+    driver: { type: 'persistent', dataPath: '.jazz/mcp-client.db' }
   })
 
   return context.asBackend()

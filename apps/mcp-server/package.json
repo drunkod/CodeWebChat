@@ -17,6 +17,7 @@
     "@modelcontextprotocol/sdk": "^1.17.0",
     "clipboardy": "^4.0.0",
     "jazz-tools": "2.0.0-alpha.51",
+    "jazz-napi": "2.0.0-alpha.51",
     "ws": "^8.18.0",
     "zod": "^3.25.0"
   },

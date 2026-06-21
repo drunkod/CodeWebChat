@@ -5,6 +5,8 @@ export type JazzConfig = {
   port: number
   dataDir: string
   serverUrl: string
+  backendSecret?: string
+  adminSecret?: string
 }
 
 export function resolveJazzConfig(): JazzConfig {
@@ -12,5 +14,7 @@ export function resolveJazzConfig(): JazzConfig {
   const appId = process.env.JAZZ_APP_ID ?? randomUUID()
   const dataDir = process.env.JAZZ_DATA_DIR ?? '.jazz/server'
   const serverUrl = process.env.JAZZ_SERVER_URL ?? `ws://localhost:${port}`
-  return { appId, port, dataDir, serverUrl }
+  const backendSecret = process.env.JAZZ_BACKEND_SECRET ?? 'cwc-default-backend-secret'
+  const adminSecret = process.env.JAZZ_ADMIN_SECRET ?? 'cwc-default-admin-secret'
+  return { appId, port, dataDir, serverUrl, backendSecret, adminSecret }
 }
