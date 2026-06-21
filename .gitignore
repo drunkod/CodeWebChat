@@ -14,3 +14,6 @@ apps/mcp-server/inspector-config.json
 
 # review-handoff local round state (transient)
 .review-handoff/
+
+# Jazz local state database files
+.jazz/

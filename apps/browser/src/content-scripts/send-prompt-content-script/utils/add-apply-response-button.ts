@@ -11,6 +11,7 @@ import { show_response_ready_notification } from './show-response-ready-notifica
 
 export function add_apply_response_button(params: {
   client_id: number
+  request_id?: string
   raw_instructions?: string
   edit_format?: string
   footer: Element
@@ -48,6 +49,24 @@ export function add_apply_response_button(params: {
     requestAnimationFrame(async () => {
       await params.perform_copy(params.footer)
       await new Promise((resolve) => setTimeout(resolve, 500))
+
+      if (params.request_id) {
+        try {
+          const response_text = await navigator.clipboard.readText()
+          browser.runtime.sendMessage<Message>({
+            action: 'cwc-reply-text',
+            request_id: params.request_id,
+            response_text
+          })
+        } catch (err) {
+          Logger.error({
+            function_name: 'add_apply_response_button',
+            message: 'Failed to read clipboard text for Jazz reply capture',
+            data: err
+          })
+        }
+      }
+
       browser.runtime.sendMessage<Message>({
         action: 'apply-chat-response',
         client_id: params.client_id,

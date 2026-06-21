@@ -338,6 +338,7 @@ export const ai_studio: Chatbot = {
     const add_buttons = (footer: Element) => {
       add_apply_response_button({
         client_id: params.client_id,
+        request_id: params.request_id,
         raw_instructions: params.raw_instructions,
         edit_format: params.edit_format,
         footer,

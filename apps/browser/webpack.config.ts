@@ -24,8 +24,7 @@ const config = (_: any, argv: Record<string, any>): webpack.Configuration => {
             __dirname,
             '../../node_modules/jazz-tools/dist/jazz_wasm_bg.wasm'
           ),
-          to: 'jazz/jazz_wasm_bg.wasm',
-          noErrorOnMissing: true
+          to: 'jazz/jazz_wasm_bg.wasm'
         }
       ]
     })

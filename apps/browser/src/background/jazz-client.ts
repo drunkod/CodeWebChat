@@ -65,10 +65,13 @@ export async function startJazzClient(opts: {
     appId: settings.appId,
     serverUrl: settings.serverUrl,
     secret: settings.secret,
-    driver: { type: 'memory' }
+    driver: { type: 'memory' },
+    runtimeSources: {
+      wasmUrl: chrome.runtime.getURL('jazz/jazz_wasm_bg.wasm')
+    }
   })) as unknown as JazzDb
 
-  const seen = new Set<string>()
+  const processing = new Set<string>()
 
   const unsubscribe = await Promise.resolve(
     db.subscribeAll(
@@ -79,11 +82,11 @@ export async function startJazzClient(opts: {
         for (const change of changes) {
           const req = change.item
 
-          if (!req.request_id || seen.has(req.request_id)) {
+          if (!req.request_id || processing.has(req.request_id)) {
             continue
           }
 
-          seen.add(req.request_id)
+          processing.add(req.request_id)
           await updateRequestStatus(db, req, 'claimed')
 
           try {
@@ -108,6 +111,8 @@ export async function startJazzClient(opts: {
             })
 
             await updateRequestStatus(db, req, 'failed')
+          } finally {
+            processing.delete(req.request_id)
           }
         }
       }

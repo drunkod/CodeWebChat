@@ -252,6 +252,7 @@ const main = async () => {
       )
       chatbot.setup_observer({
         client_id: stored_data.client_id,
+        request_id: stored_data.request_id,
         raw_instructions: stored_data.raw_instructions,
         edit_format: stored_data.edit_format,
         inject_button
@@ -267,6 +268,7 @@ const main = async () => {
         if (chatbot.setup_observer) {
           chatbot.setup_observer({
             client_id: session_data.client_id,
+            request_id: session_data.request_id,
             raw_instructions: session_data.raw_instructions,
             edit_format: session_data.edit_format,
             inject_button: session_data.inject_button ?? true

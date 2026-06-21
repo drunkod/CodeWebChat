@@ -11,6 +11,7 @@ export type Chatbot = {
   enter_system_instructions?: (chat: Chat) => Promise<void>
   setup_observer?: (params: {
     client_id: number
+    request_id?: string
     raw_instructions?: string
     edit_format?: string
     inject_button: boolean
