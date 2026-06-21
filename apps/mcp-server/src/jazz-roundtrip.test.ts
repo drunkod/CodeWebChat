@@ -1,6 +1,5 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { app } from '../../../packages/shared/dist/jazz/schema.js'
 
 const RUN_ROUNDTRIP = process.env.CWC_RUN_JAZZ_ROUNDTRIP === '1'
 const TEST_TIMEOUT_MS = Number(process.env.CWC_JAZZ_TEST_TIMEOUT_MS ?? 5000)
@@ -36,11 +35,26 @@ async function waitFor(cond: () => boolean, timeout = TEST_TIMEOUT_MS): Promise<
   }
 }
 
+async function loadSharedJazzApp(): Promise<any> {
+  const schemaUrl = new URL(
+    '../../../packages/shared/dist/jazz/schema.js',
+    import.meta.url
+  )
+  const mod = (await import(schemaUrl.href)) as { app: any }
+  return mod.app
+}
+
 test(
   'two peers exchange request/response rows over the local server',
-  { skip: RUN_ROUNDTRIP ? false : 'set CWC_RUN_JAZZ_ROUNDTRIP=1 to run real Jazz integration test' },
+  {
+    skip: RUN_ROUNDTRIP
+      ? false
+      : 'set CWC_RUN_JAZZ_ROUNDTRIP=1 to run real Jazz integration test'
+  },
   async (t) => {
     t.signal?.throwIfAborted?.()
+
+    const app = await withTimeout('import shared Jazz schema', loadSharedJazzApp())
 
     const { startLocalJazzServer } = await withTimeout(
       'import jazz-tools/dev',
