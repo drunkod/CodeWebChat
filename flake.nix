@@ -32,10 +32,10 @@
           };
 
           shellHook = ''
-            echo "Code Web Chat development shell"
-            echo "Node: $(node --version)"
-            echo "pnpm: $(pnpm --version)"
-            echo "Run 'pnpm install' to install workspace dependencies."
+            echo "Code Web Chat development shell" >&2
+            echo "Node: $(node --version)" >&2
+            echo "pnpm: $(pnpm --version)" >&2
+            echo "Run 'pnpm install' to install workspace dependencies." >&2
           '';
         };
       });

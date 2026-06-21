@@ -19,6 +19,8 @@ ls apps/mcp-server/dist/index.js
 
 ## Claude Desktop config example
 
+> Important: if you launch the server through `nix develop --command ...`, make sure any shell banner or wrapper logs go to `stderr`, not `stdout`. For stdio MCP, `stdout` must contain only MCP JSON-RPC messages.
+
 ### macOS/Linux — `~/Library/Application Support/Claude/claude_desktop_config.json`
 
 ```json
@@ -69,6 +71,17 @@ ls apps/mcp-server/dist/index.js
 ```bash
 npx @modelcontextprotocol/inspector node apps/mcp-server/dist/index.js
 ```
+
+## Stdio safety rule
+
+For MCP over stdio:
+
+```text
+stdout = only MCP JSON-RPC protocol
+stderr = logs, banners, diagnostics, warnings, version output
+```
+
+If you wrap the server with `nix develop --command ...` or a shell script, do not print banners with plain `echo` to `stdout` before the server starts.
 
 ## Manual demo prompt for the MCP client
 
