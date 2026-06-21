@@ -20,6 +20,12 @@ type RequestRecord = {
   result?: string
   error?: unknown
 }
+
+export type RequestRegistryOptions = {
+  clipboard_read_delay_ms?: number
+  use_clipboard_fallback?: boolean
+}
+
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -31,11 +37,21 @@ export class RequestRegistry {
     reject: (error: CwcMcpError) => void
   } | null = null
 
+  private readonly clipboard_read_delay_ms: number
+  private readonly use_clipboard_fallback: boolean
+
   constructor(
     private readonly transport: CwcTransport,
     private readonly read_clipboard: ReadClipboard,
-    private readonly clipboard_read_delay_ms = 250
+    options: number | RequestRegistryOptions = 250
   ) {
+    if (typeof options === 'number') {
+      this.clipboard_read_delay_ms = options
+      this.use_clipboard_fallback = true
+    } else {
+      this.clipboard_read_delay_ms = options.clipboard_read_delay_ms ?? 250
+      this.use_clipboard_fallback = options.use_clipboard_fallback ?? true
+    }
     this.transport.onApplyResponse((message) => {
       this.pending_apply?.resolve(message)
     })
@@ -124,7 +140,9 @@ export class RequestRegistry {
         'CodeWebChat did not assign a client_id.',
         'CWC_NO_CLIENT_ID'
       )
-    const before_clipboard = await this.read_clipboard()
+    const before_clipboard = this.use_clipboard_fallback
+      ? await this.read_clipboard()
+      : null
     const timeout_ms = input.timeout_ms ?? 300000
     const apply_promise = this.waitForApply(client_id, timeout_ms)
     const message: InitializeChatMessage = {
@@ -148,10 +166,16 @@ export class RequestRegistry {
     }
     this.transport.sendInitializeChat(message)
     const apply = await apply_promise
-    const response_text = apply.response_text
-    if (typeof response_text === 'string' && response_text.trim()) {
-      return response_text
+    if (typeof apply.response_text === 'string') {
+      return apply.response_text
     }
+
+    if (!this.use_clipboard_fallback)
+      throw new CwcMcpError(
+        'Apply Response completed, but the transport did not return response_text and clipboard fallback is disabled.',
+        'CWC_RESPONSE_TEXT_MISSING'
+      )
+
     await sleep(this.clipboard_read_delay_ms)
     const after_clipboard = await this.read_clipboard()
     if (!after_clipboard.trim())

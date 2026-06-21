@@ -3,6 +3,8 @@ import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
 
+export const DEFAULT_REVIEW_BASE_BRANCH = 'dev'
+
 export const DEFAULT_REVIEW_FOCUS =
   'Correctness and regressions first, then test gaps, then maintainability.'
 
@@ -48,7 +50,10 @@ async function tryGit(
   }
 }
 
-export async function currentHead(git: GitRunner, cwd: string): Promise<string> {
+export async function currentHead(
+  git: GitRunner,
+  cwd: string
+): Promise<string> {
   return (await git(['rev-parse', 'HEAD'], cwd)).trim()
 }
 
@@ -57,7 +62,10 @@ export async function buildPacket(
   options: BuildPacketOptions
 ): Promise<HandoffPacket> {
   const cwd = options.repo_path ?? process.cwd()
-  const base = options.base_branch ?? 'main'
+  const base =
+    options.base_branch ??
+    process.env.CWC_REVIEW_BASE_BRANCH ??
+    DEFAULT_REVIEW_BASE_BRANCH
 
   const draft =
     (await tryGit(git, ['rev-parse', '--abbrev-ref', 'HEAD'], cwd)) ?? 'HEAD'
@@ -77,7 +85,8 @@ export async function buildPacket(
 
   let summary = options.summary ?? ''
   if (!summary) {
-    summary = (await tryGit(git, ['log', '-1', '--pretty=%b', sha], cwd)) || title
+    summary =
+      (await tryGit(git, ['log', '-1', '--pretty=%b', sha], cwd)) || title
   }
 
   let repoName = 'unknown/unknown'
@@ -88,7 +97,8 @@ export async function buildPacket(
 
   // Changed files vs base; fall back to the last commit if base is unknown locally.
   const baseExists =
-    (await tryGit(git, ['rev-parse', '--verify', '--quiet', base], cwd)) !== null
+    (await tryGit(git, ['rev-parse', '--verify', '--quiet', base], cwd)) !==
+    null
   const diffOut = baseExists
     ? await tryGit(git, ['diff', '--name-only', `${base}...${sha}`], cwd)
     : await tryGit(git, ['diff', '--name-only', `${sha}~1`, sha], cwd)

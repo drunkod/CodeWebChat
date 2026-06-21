@@ -14,6 +14,8 @@ export class CwcMcpError extends Error {
       | 'CWC_BUSY'
       | 'CWC_PORT_IN_USE'
       | 'CWC_BROWSER_GONE'
+      | 'CWC_JAZZ_RESPONSE_ERROR'
+      | 'CWC_RESPONSE_TEXT_MISSING'
   ) {
     super(message)
     this.name = 'CwcMcpError'

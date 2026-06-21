@@ -53,22 +53,29 @@ async function expectToolFailure(
 test('lists the expected tools', async () => {
   const { tools } = await client.listTools()
   const names = tools.map((t) => t.name)
-  assert.ok(
-    names.includes('cwc_status'),
-    `missing cwc_status; got ${names.join(', ')}`
-  )
-  assert.ok(
-    names.includes('send_to_codewebchat'),
-    `missing send_to_codewebchat; got ${names.join(', ')}`
-  )
-  assert.ok(
-    names.includes('poll_cwc_response'),
-    `missing poll_cwc_response; got ${names.join(', ')}`
-  )
+  for (const expected of [
+    'cwc_status',
+    'send_to_codewebchat',
+    'poll_cwc_response',
+    'prepare_review_handoff',
+    'request_review',
+    'import_review_feedback'
+  ]) {
+    assert.ok(
+      names.includes(expected),
+      `missing ${expected}; got ${names.join(', ')}`
+    )
+  }
 })
 
 test('poll_cwc_response on an unknown ticket reports an error', async () => {
   await expectToolFailure('poll_cwc_response', { ticket: 'does-not-exist' })
+})
+
+test('import_review_feedback on an unknown ticket reports an error', async () => {
+  await expectToolFailure('import_review_feedback', {
+    ticket: 'does-not-exist'
+  })
 })
 
 test('send_to_codewebchat declares url and text as required', async () => {

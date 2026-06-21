@@ -1,11 +1,21 @@
 import { after, before, test } from 'node:test'
 import assert from 'node:assert/strict'
+import { app } from '../../../packages/shared/dist/jazz/schema.js'
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms))
+
+async function waitFor(cond: () => boolean, timeout = 2000): Promise<void> {
+  const start = Date.now()
+  while (!cond()) {
+    if (Date.now() - start > timeout) throw new Error('waitFor timed out')
+    await sleep(10)
+  }
+}
 
 let startLocalJazzServer:
   | undefined
-  | ((
-      opts: Record<string, unknown>
-    ) => Promise<{
+  | ((opts: Record<string, unknown>) => Promise<{
       appId: string
       port: number
       url: string
@@ -22,6 +32,7 @@ after(async () => {
 })
 
 test('two peers exchange request/response rows over the local server', async (t) => {
+  t.signal?.throwIfAborted?.()
   if (!startLocalJazzServer) {
     t.skip('jazz-tools/dev is not installed')
     return
@@ -32,10 +43,6 @@ test('two peers exchange request/response rows over the local server', async (t)
     const { createJazzContext } = await import('jazz-tools/backend')
     const { createDb } = await import('jazz-tools')
 
-    const app = {
-      chat_requests: 'chat_requests',
-      chat_responses: 'chat_responses'
-    } as const
     const permissions = {}
 
     const ctxA = createJazzContext({
@@ -55,7 +62,9 @@ test('two peers exchange request/response rows over the local server', async (t)
       secret: '0'.repeat(64)
     })
 
-    const unsub = dbB.subscribeAll(
+    let received: string | null = null
+
+    const unsubRequests = dbB.subscribeAll(
       app.chat_requests.where({ status: 'pending' }),
       async (delta: any) => {
         for (const change of delta.delta ?? delta) {
@@ -70,14 +79,16 @@ test('two peers exchange request/response rows over the local server', async (t)
       }
     )
 
-    const got = new Promise<string>((resolve) => {
-      dbA.subscribeAll(app.chat_responses, (delta: any) => {
+    const unsubResponses = dbA.subscribeAll(
+      app.chat_responses,
+      (delta: any) => {
         for (const change of delta.delta ?? delta) {
-          if (change.item.request_id === 'req-1')
-            resolve(change.item.response_text)
+          if (change.item.request_id === 'req-1') {
+            received = change.item.response_text
+          }
         }
-      })
-    })
+      }
+    )
 
     await dbA.insert(app.chat_requests, {
       request_id: 'req-1',
@@ -88,8 +99,11 @@ test('two peers exchange request/response rows over the local server', async (t)
       created_at: Date.now()
     })
 
-    assert.equal(await got, 'echo:hello')
-    unsub()
+    await waitFor(() => received !== null)
+    assert.equal(received, 'echo:hello')
+
+    unsubRequests()
+    unsubResponses()
   } finally {
     await server.stop()
   }

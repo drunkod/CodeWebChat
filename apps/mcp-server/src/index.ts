@@ -8,7 +8,11 @@ import { ClientTransport } from './client-transport.js'
 import { HostTransport } from './host-transport.js'
 import { RequestRegistry } from './request-registry.js'
 import { ReviewHandoff } from './review-handoff.js'
-import { realGitRunner, DEFAULT_REVIEW_FOCUS } from './git-context.js'
+import {
+  realGitRunner,
+  DEFAULT_REVIEW_BASE_BRANCH,
+  DEFAULT_REVIEW_FOCUS
+} from './git-context.js'
 import { toErrorText } from './errors.js'
 import { CWC_MCP_INSTRUCTIONS } from './instructions.js'
 import { parseTransportKind } from './transport-mode.js'
@@ -29,7 +33,9 @@ if (transportKind === 'jazz') {
 } else {
   cwcTransport = mode === 'host' ? new HostTransport() : new ClientTransport()
 }
-const registry = new RequestRegistry(cwcTransport, readSystemClipboard)
+const registry = new RequestRegistry(cwcTransport, readSystemClipboard, {
+  use_clipboard_fallback: transportKind !== 'jazz'
+})
 const reviewHandoff = new ReviewHandoff(registry, realGitRunner)
 
 const instructions = `${CWC_MCP_INSTRUCTIONS} Operating mode: ${cwcTransport.mode}. ${transportKind === 'jazz' ? 'Transport: Jazz (local sync). The reply is delivered in a synced row; no clipboard.' : cwcTransport.mode === 'host' ? 'This server hosts the relay on port 55155 and expects browser clients to connect directly.' : 'This server connects to the existing CodeWebChat VS Code relay.'}`
@@ -157,38 +163,42 @@ server.registerTool(
   }
 )
 
+const reviewHandoffInputSchema = {
+  base_branch: z
+    .string()
+    .optional()
+    .describe(
+      `Trunk to diff against. Default "${DEFAULT_REVIEW_BASE_BRANCH}".`
+    ),
+  review_focus: z
+    .string()
+    .optional()
+    .describe(
+      `What the reviewer should focus on. Default: ${DEFAULT_REVIEW_FOCUS}`
+    ),
+  summary: z
+    .string()
+    .optional()
+    .describe('Author summary of the change. Defaults to the commit body.'),
+  repo_path: z
+    .string()
+    .optional()
+    .describe('Absolute path to the git repo. Default: server cwd.'),
+  push: z
+    .boolean()
+    .optional()
+    .describe(
+      'Push the branch first so the reviewer can fetch it. Default true.'
+    )
+}
+
 server.registerTool(
   'prepare_review_handoff',
   {
     title: 'Prepare Review Handoff',
     description:
       'Gather git metadata (repo, branch, remote commit SHA, changed files) and return the filled review-handoff prompt. Does not send anything.',
-    inputSchema: {
-      base_branch: z
-        .string()
-        .optional()
-        .describe('Trunk to diff against. Default "main".'),
-      review_focus: z
-        .string()
-        .optional()
-        .describe(
-          `What the reviewer should focus on. Default: ${DEFAULT_REVIEW_FOCUS}`
-        ),
-      summary: z
-        .string()
-        .optional()
-        .describe('Author summary of the change. Defaults to the commit body.'),
-      repo_path: z
-        .string()
-        .optional()
-        .describe('Absolute path to the git repo. Default: server cwd.'),
-      push: z
-        .boolean()
-        .optional()
-        .describe(
-          'Push the branch first so the reviewer can fetch it. Default true.'
-        )
-    }
+    inputSchema: reviewHandoffInputSchema
   },
   async (input) => {
     try {
@@ -216,30 +226,7 @@ server.registerTool(
         .string()
         .url()
         .describe('URL of the GitHub-connected ChatGPT project page.'),
-      base_branch: z
-        .string()
-        .optional()
-        .describe('Trunk to diff against. Default "main".'),
-      review_focus: z
-        .string()
-        .optional()
-        .describe(
-          `What the reviewer should focus on. Default: ${DEFAULT_REVIEW_FOCUS}`
-        ),
-      summary: z
-        .string()
-        .optional()
-        .describe('Author summary of the change. Defaults to the commit body.'),
-      repo_path: z
-        .string()
-        .optional()
-        .describe('Absolute path to the git repo. Default: server cwd.'),
-      push: z
-        .boolean()
-        .optional()
-        .describe(
-          'Push the branch first so the reviewer can fetch it. Default true.'
-        ),
+      ...reviewHandoffInputSchema,
       timeout_ms: z.number().int().positive().max(900000).optional()
     }
   },
@@ -255,13 +242,46 @@ server.registerTool(
                 status: 'pending',
                 ticket: result.ticket,
                 reviewed_sha: result.reviewed_sha,
-                packet: result.packet
+                packet: result.packet,
+                next: 'After the reviewer response is available, call import_review_feedback with this ticket.'
               },
               null,
               2
             )
           }
         ]
+      }
+    } catch (error) {
+      return {
+        isError: true,
+        content: [{ type: 'text', text: toErrorText(error) }]
+      }
+    }
+  }
+)
+
+server.registerTool(
+  'import_review_feedback',
+  {
+    title: 'Import Review Feedback',
+    description:
+      'Poll a review ticket. When the review is ready, return the parsed verdict/findings/tests/patch-plan plus a "stale" flag if the branch HEAD has drifted from the reviewed commit. Returns status pending if the user has not clicked Apply Response yet.',
+    inputSchema: {
+      ticket: z.string().min(1).describe('Ticket returned by request_review.'),
+      wait_ms: z
+        .number()
+        .int()
+        .positive()
+        .max(30000)
+        .optional()
+        .describe('Max time to wait this call.')
+    }
+  },
+  async ({ ticket, wait_ms }) => {
+    try {
+      const result = await reviewHandoff.importFeedback(ticket, wait_ms)
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
       }
     } catch (error) {
       return {

@@ -6,18 +6,30 @@ import type {
   ApplyChatResponseMessage
 } from './protocol.js'
 import type { JazzConfig } from './jazz-config.js'
-import { app } from '../../../packages/shared/src/jazz/schema.js'
+import { app } from '../../../packages/shared/dist/jazz/schema.js'
+import type {
+  ChatRequestInsert,
+  ChatResponseRow
+} from '../../../packages/shared/dist/jazz/schema.js'
 
-export type BackendDbFactory = (config: JazzConfig) => Promise<any>
-
-type ChatResponseRow = {
-  request_id: string
-  response_text?: string
+type JazzDb = {
+  subscribeAll: (
+    queryOrTable: unknown,
+    cb: (
+      delta:
+        | { delta?: Array<{ item: ChatResponseRow }> }
+        | Array<{ item: ChatResponseRow }>
+    ) => void
+  ) => (() => void) | Promise<() => void>
+  insert: (table: unknown, row: ChatRequestInsert) => Promise<unknown>
+  shutdown?: () => Promise<void>
 }
+
+export type BackendDbFactory = (config: JazzConfig) => Promise<JazzDb>
 
 export class JazzTransport implements CwcTransport {
   public readonly mode = 'host' as const
-  private db: any | null = null
+  private db: JazzDb | null = null
   private unsubscribe: (() => void) | null = null
   private connected = false
   private browser_seen_at = 0
@@ -52,23 +64,42 @@ export class JazzTransport implements CwcTransport {
   async connect(): Promise<void> {
     if (this.connected) return
     this.db = await this.makeDb(this.config)
-    this.unsubscribe = this.db.subscribeAll(
-      'chat_responses',
-      ({ delta }: { delta: Array<{ item: ChatRequestRow }> }) => {
+    const maybeUnsubscribe = this.db.subscribeAll(
+      app.chat_responses,
+      (changeSet) => {
+        const delta = Array.isArray(changeSet)
+          ? changeSet
+          : (changeSet.delta ?? [])
+
         for (const change of delta) {
           const row = change.item
           const client_id = this.inflight.get(row.request_id)
           if (client_id === undefined) continue
+
+          this.browser_seen_at = Date.now()
           this.inflight.delete(row.request_id)
+
+          if (row.status === 'error') {
+            this.close_handler(
+              new CwcMcpError(
+                row.error ||
+                  'CodeWebChat returned an error over Jazz transport.',
+                'CWC_JAZZ_RESPONSE_ERROR'
+              )
+            )
+            continue
+          }
+
           this.apply_handler({
             action: 'apply-chat-response',
             client_id,
             response_text: row.response_text ?? '',
             url: undefined
-          } as ApplyChatResponseMessage & { response_text?: string })
+          })
         }
       }
     )
+    this.unsubscribe = await Promise.resolve(maybeUnsubscribe)
     this.connected = true
   }
 
@@ -85,7 +116,7 @@ export class JazzTransport implements CwcTransport {
     const request_id = randomUUID()
     this.inflight.set(request_id, message.client_id)
     void this.db
-      .insert('chat_requests', {
+      .insert(app.chat_requests, {
         request_id,
         url: message.url,
         text: message.text,
@@ -105,6 +136,8 @@ export class JazzTransport implements CwcTransport {
     await this.db?.shutdown?.()
     this.db = null
     this.connected = false
+    this.browser_seen_at = 0
+    this.inflight.clear()
   }
 
   markBrowserSeen(): void {
@@ -112,10 +145,28 @@ export class JazzTransport implements CwcTransport {
   }
 }
 
-async function defaultMakeDb(_config: JazzConfig): Promise<any> {
-  return {
-    subscribeAll: (_q: unknown, _cb: unknown) => () => undefined,
-    insert: async () => undefined,
-    shutdown: async () => undefined
+async function defaultMakeDb(config: JazzConfig): Promise<JazzDb> {
+  const backendModule = (await import('jazz-tools/backend')) as unknown as {
+    createJazzContext: (options: {
+      appId: string
+      app: typeof app
+      permissions: Record<string, never>
+      serverUrl: string
+      allowLocalFirstAuth: boolean
+      driver: { type: 'memory' }
+    }) => {
+      asBackend: () => JazzDb
+    }
   }
+
+  const context = backendModule.createJazzContext({
+    appId: config.appId,
+    app,
+    permissions: {},
+    serverUrl: config.serverUrl,
+    allowLocalFirstAuth: true,
+    driver: { type: 'memory' }
+  })
+
+  return context.asBackend()
 }
