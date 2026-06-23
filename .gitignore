@@ -17,3 +17,4 @@ apps/mcp-server/inspector-config.json
 
 # Jazz local state database files
 .jazz/
+packages/shared/out/
