@@ -13,16 +13,23 @@ import type {
   ChatResponseRow
 } from '../../../packages/shared/dist/jazz/schema.js'
 
+type WaitHandle = {
+  wait?: (opts?: { tier?: 'local' | 'edge' | 'global' }) => Promise<unknown>
+}
+
 type JazzDb = {
   subscribeAll: (
     queryOrTable: unknown,
     cb: (
       delta:
-        | { delta?: Array<{ item: ChatResponseRow }> }
-        | Array<{ item: ChatResponseRow }>
+        | { delta?: Array<{ item?: ChatResponseRow }> }
+        | Array<{ item?: ChatResponseRow }>
     ) => void
   ) => (() => void) | Promise<() => void>
-  insert: (table: unknown, row: ChatRequestInsert) => Promise<unknown>
+  insert: (
+    table: unknown,
+    row: ChatRequestInsert
+  ) => WaitHandle | Promise<WaitHandle | unknown>
   shutdown?: () => Promise<void>
 }
 
@@ -125,13 +132,14 @@ export class JazzTransport implements CwcTransport {
         prompt_type: message.prompt_type ?? 'edit-context',
         status: 'pending',
         created_at: Date.now()
-      }) as any
-      if (typeof result.wait === 'function') {
-        void result.wait({ tier: 'edge' }).catch((e: unknown) => {
+      })
+
+      void Promise.resolve(result)
+        .then((handle) => handle?.wait?.({ tier: 'edge' }))
+        .catch((e: unknown) => {
           this.inflight.delete(request_id)
           this.close_handler(e)
         })
-      }
     } catch (e: unknown) {
       this.inflight.delete(request_id)
       this.close_handler(e)
