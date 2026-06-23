@@ -120,15 +120,18 @@ export async function startJazzClient(opts: {
     // Yield before any Jazz writes so we are off the subscribeAll call stack.
     await new Promise<void>((resolve) => setTimeout(resolve, 0))
 
+    console.log('Jazz client: drainQueue running, queue length:', queue.length)
     try {
       while (queue.length > 0) {
         const req = queue.shift()!
-
+        console.log('Jazz client: processing request', req.request_id)
         try {
+          console.log('Jazz client: updating status to claimed')
           await updateRequestStatus(db, req, 'claimed')
+          console.log('Jazz client: status updated, calling onRequest')
 
           const response_text = await opts.onRequest(req)
-
+          console.log('Jazz client: onRequest returned, inserting response')
           await db
             .insert(app.chat_responses, {
               request_id: req.request_id,
@@ -141,6 +144,7 @@ export async function startJazzClient(opts: {
 
           await updateRequestStatus(db, req, 'done')
         } catch (error) {
+          console.error('Jazz client: request processing error:', error instanceof Error ? error.message : String(error))
           await db
             .insert(app.chat_responses, {
               request_id: req.request_id,
@@ -165,19 +169,24 @@ export async function startJazzClient(opts: {
     }
   }
 
+  console.log('Jazz client: subscribing to pending chat_requests')
   const unsubscribe = await Promise.resolve(
     db.subscribeAll(
       app.chat_requests.where({ status: 'pending' }),
       (deltaLike: unknown) => {
+        console.log('Jazz client: subscribeAll delta received', JSON.stringify(deltaLike).slice(0, 200))
         const changes = normalizeDelta<ChatRequestRow>(deltaLike)
+        console.log('Jazz client: normalized changes count:', changes.length)
         for (const change of changes) {
           const req = change.item
           if (!req?.request_id) continue
+          console.log('Jazz client: enqueueing request', req.request_id)
           enqueue(req)
         }
       }
     )
   )
+  console.log('Jazz client: subscription established')
 
   return {
     db,

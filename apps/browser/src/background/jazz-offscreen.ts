@@ -25,6 +25,9 @@ function waitForSettings(): Promise<JazzBrowserSettings> {
         resolve(message.settings as JazzBrowserSettings)
       }
     })
+
+    // Signal SW that the listener is registered and settings can be sent.
+    chrome.runtime.sendMessage({ action: 'cwc-jazz-offscreen-ready' }).catch(() => {})
   })
 }
 

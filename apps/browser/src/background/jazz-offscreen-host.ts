@@ -3,10 +3,22 @@ import type { JazzBrowserSettings } from './jazz-settings'
 const OFFSCREEN_PATH = 'jazz-offscreen.html'
 
 let creating: Promise<void> | null = null
+let pendingSettings: JazzBrowserSettings | null = null
+
+// Listen for the offscreen document's "ready" signal, then deliver settings.
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.action === 'cwc-jazz-offscreen-ready' && pendingSettings) {
+    chrome.runtime
+      .sendMessage({ action: 'cwc-jazz-init', settings: pendingSettings })
+      .catch(() => {})
+  }
+})
 
 export async function ensureJazzOffscreenDocument(
   settings: JazzBrowserSettings
 ): Promise<void> {
+  pendingSettings = settings
+
   const offscreenUrl = chrome.runtime.getURL(OFFSCREEN_PATH)
 
   if ('getContexts' in chrome.runtime) {
@@ -15,7 +27,7 @@ export async function ensureJazzOffscreenDocument(
       documentUrls: [offscreenUrl]
     })
     if (contexts.length > 0) {
-      // Already running — re-send settings in case the offscreen doc restarted
+      // Already running — re-send settings in case the offscreen doc restarted.
       chrome.runtime
         .sendMessage({ action: 'cwc-jazz-init', settings })
         .catch(() => {})
@@ -34,9 +46,5 @@ export async function ensureJazzOffscreenDocument(
 
   await creating
   creating = null
-
-  // Send settings to the newly created offscreen document
-  chrome.runtime
-    .sendMessage({ action: 'cwc-jazz-init', settings })
-    .catch(() => {})
+  // Settings will be sent when the offscreen doc fires cwc-jazz-offscreen-ready.
 }
