@@ -175,6 +175,20 @@ const handle_chat_initialized = async () => {
 export const setup_message_listeners = () => {
   browser.runtime.onMessage.addListener(
     (message: any, sender: any, _: any): any => {
+      if (
+        message &&
+        typeof message === 'object' &&
+        message.action === 'cwc-jazz-process-request'
+      ) {
+        const { driveChatbotAndCaptureReply } = require('./jazz-capture')
+        return driveChatbotAndCaptureReply(message.request)
+          .then((response_text: string) => ({ ok: true, response_text }))
+          .catch((error: unknown) => ({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error)
+          }))
+      }
+
       if (is_message(message)) {
         if (message.action == 'chat-initialized') {
           handle_chat_initialized()

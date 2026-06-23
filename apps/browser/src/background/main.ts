@@ -3,8 +3,7 @@ import { setup_keep_alive } from './keep-alive'
 import { setup_message_listeners } from './message-handler'
 import { clear_chat_init_data } from './clear-chat-init-data'
 import { getJazzBrowserSettings } from './jazz-settings'
-import { startJazzClient } from './jazz-client'
-import { driveChatbotAndCaptureReply } from './jazz-capture'
+import { ensureJazzOffscreenDocument } from './jazz-offscreen-host'
 
 async function init() {
   await clear_chat_init_data()
@@ -12,15 +11,13 @@ async function init() {
   const jazz = await getJazzBrowserSettings()
 
   if (jazz.enabled) {
-    const handle = await startJazzClient({
-      onRequest: driveChatbotAndCaptureReply
-    })
-
-    if (handle) {
-      console.log('CodeWebChat Jazz transport enabled')
-    } else {
+    try {
+      await ensureJazzOffscreenDocument(jazz)
+      console.log('CodeWebChat Jazz offscreen document enabled')
+    } catch (error) {
       console.warn(
-        'Jazz transport requested but did not start; falling back to WebSocket'
+        'Jazz offscreen document failed to create; falling back to WebSocket:',
+        error
       )
       connect_websocket()
     }

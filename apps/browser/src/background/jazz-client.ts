@@ -72,8 +72,14 @@ async function updateRequestStatus(
 
 export async function startJazzClient(opts: {
   onRequest: (req: ChatRequestRow) => Promise<string>
+  settings?: {
+    enabled: boolean
+    appId: string
+    serverUrl: string
+    secret: string
+  }
 }): Promise<JazzClientHandle | null> {
-  const settings = await getJazzBrowserSettings()
+  const settings = opts.settings ?? (await getJazzBrowserSettings())
 
   if (!settings.enabled) {
     return null
@@ -97,55 +103,77 @@ export async function startJazzClient(opts: {
   })) as unknown as JazzDb
 
   const processing = new Set<string>()
+  const queue: ChatRequestRow[] = []
+  let draining = false
+
+  function enqueue(req: ChatRequestRow): void {
+    if (!req.request_id || processing.has(req.request_id)) return
+    processing.add(req.request_id)
+    queue.push(req)
+    if (!draining) {
+      draining = true
+      setTimeout(() => void drainQueue(), 0)
+    }
+  }
+
+  async function drainQueue(): Promise<void> {
+    // Yield before any Jazz writes so we are off the subscribeAll call stack.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+    try {
+      while (queue.length > 0) {
+        const req = queue.shift()!
+
+        try {
+          await updateRequestStatus(db, req, 'claimed')
+
+          const response_text = await opts.onRequest(req)
+
+          await db
+            .insert(app.chat_responses, {
+              request_id: req.request_id,
+              response_text,
+              status: 'done',
+              error: undefined,
+              created_at: Date.now()
+            })
+            .wait({ tier: 'edge' })
+
+          await updateRequestStatus(db, req, 'done')
+        } catch (error) {
+          await db
+            .insert(app.chat_responses, {
+              request_id: req.request_id,
+              response_text: '',
+              status: 'error',
+              error: error instanceof Error ? error.message : String(error),
+              created_at: Date.now()
+            })
+            .wait({ tier: 'edge' })
+
+          await updateRequestStatus(db, req, 'failed')
+        } finally {
+          processing.delete(req.request_id)
+        }
+      }
+    } finally {
+      draining = false
+      if (queue.length > 0) {
+        draining = true
+        setTimeout(() => void drainQueue(), 0)
+      }
+    }
+  }
 
   const unsubscribe = await Promise.resolve(
     db.subscribeAll(
       app.chat_requests.where({ status: 'pending' }),
-      async (deltaLike: unknown) => {
+      (deltaLike: unknown) => {
         const changes = normalizeDelta<ChatRequestRow>(deltaLike)
-
         for (const change of changes) {
           const req = change.item
-
-          if (!req?.request_id || processing.has(req.request_id)) {
-            continue
-          }
-
-          processing.add(req.request_id)
-          await updateRequestStatus(db, req, 'claimed')
-
-          try {
-            const response_text = await opts.onRequest(req)
-
-            // .wait({ tier: 'edge' }) confirms the reply reached the sync server
-            // before this MV3 service worker can be suspended/killed — otherwise
-            // a local-only write can be lost and the MCP peer never sees it.
-            await db
-              .insert(app.chat_responses, {
-                request_id: req.request_id,
-                response_text,
-                status: 'done',
-                error: undefined,
-                created_at: Date.now()
-              })
-              .wait({ tier: 'edge' })
-
-            await updateRequestStatus(db, req, 'done')
-          } catch (error) {
-            await db
-              .insert(app.chat_responses, {
-                request_id: req.request_id,
-                response_text: '',
-                status: 'error',
-                error: error instanceof Error ? error.message : String(error),
-                created_at: Date.now()
-              })
-              .wait({ tier: 'edge' })
-
-            await updateRequestStatus(db, req, 'failed')
-          } finally {
-            processing.delete(req.request_id)
-          }
+          if (!req?.request_id) continue
+          enqueue(req)
         }
       }
     )

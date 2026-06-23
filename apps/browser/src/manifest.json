@@ -12,7 +12,7 @@
     "48": "icons/icon-48.png",
     "128": "icons/icon-128.png"
   },
-  "permissions": ["storage", "alarms"],
+  "permissions": ["storage", "alarms", "offscreen"],
   "host_permissions": [
     "http://localhost:55155/",
     "ws://localhost:55155/",

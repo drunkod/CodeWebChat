@@ -1,5 +1,3 @@
-import browser from 'webextension-polyfill'
-
 export type JazzBrowserSettings = {
   enabled: boolean
   appId: string
@@ -14,14 +12,17 @@ const SECRET_KEY = 'cwc_jazz_secret'
 
 const DEFAULT_SERVER_URL = 'ws://localhost:1625'
 
-function randomHex(bytes: number): string {
+function randomBase64url(bytes: number): string {
   const data = new Uint8Array(bytes)
   crypto.getRandomValues(data)
-  return [...data].map((b) => b.toString(16).padStart(2, '0')).join('')
+  return btoa(String.fromCharCode(...data))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')
 }
 
 export async function getJazzBrowserSettings(): Promise<JazzBrowserSettings> {
-  const got = await browser.storage.local.get([
+  const got = await chrome.storage.local.get([
     ENABLED_KEY,
     APP_ID_KEY,
     SERVER_URL_KEY,
@@ -45,15 +46,15 @@ export async function getJazzBrowserSettings(): Promise<JazzBrowserSettings> {
       : ''
 
   if (!secret) {
-    secret = randomHex(32)
-    await browser.storage.local.set({ [SECRET_KEY]: secret })
+    secret = randomBase64url(32)
+    await chrome.storage.local.set({ [SECRET_KEY]: secret })
   }
 
   return { enabled, appId, serverUrl, secret }
 }
 
 export async function setJazzEnabled(enabled: boolean): Promise<void> {
-  await browser.storage.local.set({ [ENABLED_KEY]: enabled })
+  await chrome.storage.local.set({ [ENABLED_KEY]: enabled })
 }
 
 export async function setJazzLocalConfig(opts: {
@@ -63,5 +64,5 @@ export async function setJazzLocalConfig(opts: {
   const patch: Record<string, string> = {}
   if (opts.appId) patch[APP_ID_KEY] = opts.appId
   if (opts.serverUrl) patch[SERVER_URL_KEY] = opts.serverUrl
-  await browser.storage.local.set(patch)
+  await chrome.storage.local.set(patch)
 }

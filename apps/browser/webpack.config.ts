@@ -18,6 +18,10 @@ const config = (_: any, argv: Record<string, any>): webpack.Configuration => {
         { from: 'src/manifest.json', to: 'manifest.json' },
         { from: 'src/icons', to: 'icons' },
         { from: 'src/views/popup/index.html', to: 'popup.html' },
+        {
+          from: 'src/background/jazz-offscreen.html',
+          to: 'jazz-offscreen.html'
+        },
         { from: 'src/views/popup/index.css', to: 'index.css' },
         {
           from: path.resolve(
@@ -42,7 +46,8 @@ const config = (_: any, argv: Record<string, any>): webpack.Configuration => {
       'send-prompt-content-script':
         './src/content-scripts/send-prompt-content-script/send-prompt-content-script.ts',
       background: './src/background/main.ts',
-      popup: './src/views/popup/App.tsx'
+      popup: './src/views/popup/App.tsx',
+      'jazz-offscreen': './src/background/jazz-offscreen.ts'
     },
     output: {
       path: path.resolve(__dirname, 'dist'),
