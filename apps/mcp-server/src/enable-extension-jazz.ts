@@ -1,4 +1,22 @@
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { WebSocket } from 'ws'
+
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../..')
+
+function readAppId(): string {
+  const appId = process.env.JAZZ_APP_ID?.trim()
+  if (appId) return appId
+
+  try {
+    return readFileSync(join(repoRoot, '.jazz/app-id'), 'utf8').trim()
+  } catch {
+    throw new Error(
+      'No Jazz app id found. Set JAZZ_APP_ID or run scripts/jazz-server.sh to create .jazz/app-id.'
+    )
+  }
+}
 
 async function main() {
   const listUrl = 'http://127.0.0.1:9222/json/list'
@@ -28,8 +46,9 @@ async function main() {
     process.exit(1)
   }
 
-  const appId = 'e06170f2-5bf5-421d-ae69-997e6a3c0bb7'
-  console.log(`Setting settings for app ID: ${appId}`)
+  const appId = readAppId()
+  const serverUrl = process.env.JAZZ_SERVER_URL ?? 'ws://localhost:1625'
+  console.log(`Setting Jazz settings: appId=${appId}, serverUrl=${serverUrl}`)
 
   const ws = new WebSocket(extensionTarget.webSocketDebuggerUrl)
 
@@ -41,8 +60,8 @@ async function main() {
     const expr = `
       chrome.storage.local.set({
         cwc_jazz_enabled: true,
-        cwc_jazz_app_id: '${appId}',
-        cwc_jazz_server_url: 'ws://localhost:1625'
+        cwc_jazz_app_id: ${JSON.stringify(appId)},
+        cwc_jazz_server_url: ${JSON.stringify(serverUrl)}
       }).then(() => {
         console.log('Jazz configured! Reloading extension...');
         chrome.runtime.reload();
