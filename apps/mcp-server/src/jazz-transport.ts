@@ -135,7 +135,7 @@ export class JazzTransport implements CwcTransport {
       })
 
       void Promise.resolve(result)
-        .then((handle) => handle?.wait?.({ tier: 'edge' }))
+        .then((handle) => (handle as WaitHandle)?.wait?.({ tier: 'edge' }))
         .catch((e: unknown) => {
           this.inflight.delete(request_id)
           this.close_handler(e)
