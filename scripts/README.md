@@ -3,16 +3,17 @@
 All scripts run inside the nix dev shell by default. If you're already inside
 `nix develop`, prefix with `CWC_NO_NIX=1` to skip the wrapper.
 
-| Script | What it does |
-| --- | --- |
-| `build.sh` | `pnpm install` + build MCP server + browser extension |
-| `test.sh` | MCP server test suite (expect 21 pass / 0 fail / 2 skipped on macOS) |
-| `jazz-server.sh` | Start the standalone `jazz-tools@alpha server` for local Jazz sync |
-| `run-jazz-external.sh` | Run MCP server in Jazz mode against a standalone external sync server |
-| `test-jazz-canary.sh` | Schema-admin canary — run FIRST after any jazz upgrade |
-| `test-jazz-roundtrip.sh` | Real two-peer Jazz roundtrip (no browser). `JAZZ_DEBUG=1` for logs |
-| `inspect-ws.sh` | MCP Inspector → server in ws/clipboard mode (the working path) |
-| `inspect-jazz.sh` | MCP Inspector → server in Jazz mode via the validated standalone sync path |
+| Script                   | What it does                                                                         |
+| ------------------------ | ------------------------------------------------------------------------------------ |
+| `build.sh`               | `pnpm install` + build MCP server + browser extension                                |
+| `test.sh`                | MCP server test suite (expect 21 pass / 0 fail / 2 skipped on macOS)                 |
+| `jazz-server.sh`         | Start the standalone `jazz-tools@alpha server` for local Jazz sync                   |
+| `run-jazz-external.sh`   | Run MCP server in Jazz mode against a standalone external sync server                |
+| `test-jazz-canary.sh`    | Schema-admin canary — run FIRST after any jazz upgrade                               |
+| `test-jazz-roundtrip.sh` | Real two-peer Jazz roundtrip (no browser). `JAZZ_DEBUG=1` for logs                   |
+| `test-jazz-mcp-e2e.sh`   | Headless E2E: standalone Jazz server + schema deploy + MCP stdio + fake browser peer |
+| `inspect-ws.sh`          | MCP Inspector → server in ws/clipboard mode (the working path)                       |
+| `inspect-jazz.sh`        | MCP Inspector → server in Jazz mode via the validated standalone sync path           |
 
 ## Recommended order
 
@@ -32,6 +33,7 @@ scripts/run-jazz-external.sh
 # Jazz automated checks / Inspector:
 scripts/test-jazz-canary.sh    # should PASS on alpha.51 (the old 404 was a non-UUID app id)
 scripts/test-jazz-roundtrip.sh # real two-peer roundtrip
+scripts/test-jazz-mcp-e2e.sh  # MCP tool roundtrip with fake browser Jazz peer
 scripts/inspect-jazz.sh
 ```
 

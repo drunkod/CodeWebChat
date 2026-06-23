@@ -55,6 +55,7 @@ fi
 export JAZZ_EXTERNAL_SERVER="${JAZZ_EXTERNAL_SERVER:-1}"
 export JAZZ_APP_ID
 export JAZZ_SERVER_URL="${JAZZ_SERVER_URL:-ws://localhost:1625}"
+export JAZZ_BACKEND_SECRET="${JAZZ_BACKEND_SECRET:-cwc-rt-backend}"
 export JAZZ_ADMIN_SECRET="${JAZZ_ADMIN_SECRET:-cwc-rt-admin}"
 export CWC_TRANSPORT="${CWC_TRANSPORT:-jazz}"
 
