@@ -12,7 +12,6 @@ const APP_ID_KEY = 'cwc_jazz_app_id'
 const SERVER_URL_KEY = 'cwc_jazz_server_url'
 const SECRET_KEY = 'cwc_jazz_secret'
 
-const DEFAULT_APP_ID = 'cwc-local-dev'
 const DEFAULT_SERVER_URL = 'ws://localhost:1625'
 
 function randomHex(bytes: number): string {
@@ -32,12 +31,12 @@ export async function getJazzBrowserSettings(): Promise<JazzBrowserSettings> {
   const enabled = got[ENABLED_KEY] === true
   const appId =
     typeof got[APP_ID_KEY] === 'string' && got[APP_ID_KEY].trim()
-      ? got[APP_ID_KEY]
-      : DEFAULT_APP_ID
+      ? got[APP_ID_KEY].trim()
+      : ''
 
   const serverUrl =
     typeof got[SERVER_URL_KEY] === 'string' && got[SERVER_URL_KEY].trim()
-      ? got[SERVER_URL_KEY]
+      ? got[SERVER_URL_KEY].trim()
       : DEFAULT_SERVER_URL
 
   let secret =
