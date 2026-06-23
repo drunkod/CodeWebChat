@@ -27,7 +27,7 @@ type JazzDb = {
   shutdown?: () => Promise<void>
 }
 
-type JazzChange<T> = { item: T }
+type JazzChange<T> = { item?: T }
 
 type RequestWithMaybeId = ChatRequestRow & {
   id?: string
@@ -37,6 +37,9 @@ export type JazzClientHandle = {
   db: JazzDb
   stop: () => Promise<void>
 }
+
+const uuidRe =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
 
 function normalizeDelta<T>(deltaLike: unknown): Array<JazzChange<T>> {
   if (Array.isArray(deltaLike)) return deltaLike as Array<JazzChange<T>>
@@ -76,6 +79,13 @@ export async function startJazzClient(opts: {
     return null
   }
 
+  if (!uuidRe.test(settings.appId)) {
+    console.warn(
+      'Jazz is enabled, but cwc_jazz_app_id is missing or not a UUID. Run scripts/jazz-server.sh and set cwc_jazz_app_id to the value in .jazz/app-id.'
+    )
+    return null
+  }
+
   const db = (await createDb({
     appId: settings.appId,
     serverUrl: settings.serverUrl,
@@ -97,7 +107,7 @@ export async function startJazzClient(opts: {
         for (const change of changes) {
           const req = change.item
 
-          if (!req.request_id || processing.has(req.request_id)) {
+          if (!req?.request_id || processing.has(req.request_id)) {
             continue
           }
 
