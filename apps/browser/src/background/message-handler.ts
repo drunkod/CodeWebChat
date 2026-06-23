@@ -17,7 +17,7 @@ let is_processing = false
 let last_opened_tab_id: number | undefined
 let is_finished_responding = false
 
-const CHAT_INITIALIZATION_TIMEOUT = 5000
+const CHAT_INITIALIZATION_TIMEOUT = 60000
 
 export const handle_messages = (message: WebSocketMessage) => {
   if (message.action == 'initialize-chat') {
