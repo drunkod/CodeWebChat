@@ -7,8 +7,23 @@ type JazzDb = {
     queryOrTable: unknown,
     cb: (delta: unknown) => void | Promise<void>
   ) => (() => void) | Promise<() => void>
-  insert: (table: unknown, row: unknown) => Promise<unknown>
-  update?: (table: unknown, id: string, patch: unknown) => Promise<unknown>
+  // insert/update return a synchronous write handle, NOT a Promise. You must
+  // call .wait({ tier }) on the handle to await durability — `await db.insert(...)`
+  // alone resolves immediately at the local tier and does not confirm the write
+  // reached the sync server.
+  insert: (
+    table: unknown,
+    row: unknown
+  ) => {
+    wait: (opts?: { tier?: 'local' | 'edge' | 'global' }) => Promise<unknown>
+  }
+  update?: (
+    table: unknown,
+    id: string,
+    patch: unknown
+  ) => {
+    wait: (opts?: { tier?: 'local' | 'edge' | 'global' }) => Promise<unknown>
+  }
   shutdown?: () => Promise<void>
 }
 
@@ -46,7 +61,7 @@ async function updateRequestStatus(
   if (!id || !db.update) return
 
   try {
-    await db.update(app.chat_requests, id, { status })
+    await db.update(app.chat_requests, id, { status }).wait({ tier: 'edge' })
   } catch (error) {
     console.warn('Could not update Jazz request status:', error)
   }
@@ -92,23 +107,30 @@ export async function startJazzClient(opts: {
           try {
             const response_text = await opts.onRequest(req)
 
-            await db.insert(app.chat_responses, {
-              request_id: req.request_id,
-              response_text,
-              status: 'done',
-              error: undefined,
-              created_at: Date.now()
-            })
+            // .wait({ tier: 'edge' }) confirms the reply reached the sync server
+            // before this MV3 service worker can be suspended/killed — otherwise
+            // a local-only write can be lost and the MCP peer never sees it.
+            await db
+              .insert(app.chat_responses, {
+                request_id: req.request_id,
+                response_text,
+                status: 'done',
+                error: undefined,
+                created_at: Date.now()
+              })
+              .wait({ tier: 'edge' })
 
             await updateRequestStatus(db, req, 'done')
           } catch (error) {
-            await db.insert(app.chat_responses, {
-              request_id: req.request_id,
-              response_text: '',
-              status: 'error',
-              error: error instanceof Error ? error.message : String(error),
-              created_at: Date.now()
-            })
+            await db
+              .insert(app.chat_responses, {
+                request_id: req.request_id,
+                response_text: '',
+                status: 'error',
+                error: error instanceof Error ? error.message : String(error),
+                created_at: Date.now()
+              })
+              .wait({ tier: 'edge' })
 
             await updateRequestStatus(db, req, 'failed')
           } finally {

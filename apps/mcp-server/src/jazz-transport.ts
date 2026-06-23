@@ -73,7 +73,8 @@ export class JazzTransport implements CwcTransport {
           : (changeSet.delta ?? [])
 
         for (const change of delta) {
-          const row = change.item
+          const row = change?.item
+          if (!row) continue
           const client_id = this.inflight.get(row.request_id)
           if (client_id === undefined) continue
 
@@ -116,19 +117,25 @@ export class JazzTransport implements CwcTransport {
       )
     const request_id = randomUUID()
     this.inflight.set(request_id, message.client_id)
-    void this.db
-      .insert(app.chat_requests, {
+    try {
+      const result = this.db.insert(app.chat_requests, {
         request_id,
         url: message.url,
         text: message.text,
         prompt_type: message.prompt_type ?? 'edit-context',
         status: 'pending',
         created_at: Date.now()
-      })
-      .catch((e: unknown) => {
-        this.inflight.delete(request_id)
-        this.close_handler(e)
-      })
+      }) as any
+      if (typeof result.wait === 'function') {
+        void result.wait({ tier: 'edge' }).catch((e: unknown) => {
+          this.inflight.delete(request_id)
+          this.close_handler(e)
+        })
+      }
+    } catch (e: unknown) {
+      this.inflight.delete(request_id)
+      this.close_handler(e)
+    }
   }
 
   async close(): Promise<void> {
@@ -168,8 +175,8 @@ async function defaultMakeDb(config: JazzConfig): Promise<JazzDb> {
     permissions,
     serverUrl: config.serverUrl,
     allowLocalFirstAuth: true,
-    backendSecret: config.backendSecret ?? 'cwc-default-backend-secret',
-    adminSecret: config.adminSecret ?? 'cwc-default-admin-secret',
+    backendSecret: config.backendSecret ?? 'cwc-rt-backend',
+    adminSecret: config.adminSecret ?? 'cwc-rt-admin',
     driver: { type: 'persistent', dataPath: '.jazz/mcp-client.db' }
   })
 
