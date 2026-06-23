@@ -98,8 +98,8 @@ test(
       'startLocalJazzServer',
       startLocalJazzServer({ inMemory: true })
     )
-    const backendSecret = server.backendSecret ?? 'cwc-rt-backend-secret'
-    const adminSecret = server.adminSecret ?? 'cwc-rt-admin-secret'
+    const backendSecret = server.backendSecret ?? 'cwc-rt-backend'
+    const adminSecret = server.adminSecret ?? 'cwc-rt-admin'
 
     const dbDirA = mkdtempSync(join(tmpdir(), 'cwc-dbA-'))
     const dbDirB = mkdtempSync(join(tmpdir(), 'cwc-dbB-'))
@@ -212,7 +212,10 @@ test(
         })
         .wait({ tier: 'edge' })
 
-      await withTimeout('waitFor received', waitFor(() => received !== null))
+      await withTimeout(
+        'waitFor received',
+        waitFor(() => received !== null)
+      )
       assert.equal(received, 'echo:hello')
     } finally {
       unsubResponses?.()
@@ -221,7 +224,9 @@ test(
       if (dbA) await dbA.shutdown?.().catch(() => undefined)
       if (dbB) await dbB.shutdown?.().catch(() => undefined)
 
-      await withTimeout('server.stop', server.stop(), 3000).catch(() => undefined)
+      await withTimeout('server.stop', server.stop(), 3000).catch(
+        () => undefined
+      )
 
       try {
         rmSync(dbDirA, { recursive: true, force: true })

@@ -43,8 +43,8 @@ export async function startSyncServer(
     appId: config.appId,
     port: config.port,
     dataDir: config.dataDir,
-    backendSecret: config.backendSecret ?? 'cwc-default-backend-secret',
-    adminSecret: config.adminSecret ?? 'cwc-default-admin-secret',
+    backendSecret: config.backendSecret ?? 'cwc-rt-backend',
+    adminSecret: config.adminSecret ?? 'cwc-rt-admin',
     enableLogs: process.env.JAZZ_DEBUG === '1'
   })
 
@@ -69,7 +69,7 @@ export async function pushSchema(
     await pushSchemaCatalogue({
       appId: config.appId,
       serverUrl,
-      adminSecret: config.adminSecret ?? 'cwc-default-admin-secret',
+      adminSecret: config.adminSecret ?? 'cwc-rt-admin',
       schemaDir
     })
   } catch (error) {
