@@ -8,7 +8,7 @@
 #
 # Expected companion commands:
 #   scripts/jazz-server.sh
-#   npx jazz-tools@alpha deploy cwc-local-dev --server-url http://localhost:1625 --admin-secret cwc-rt-admin
+#   npx jazz-tools@alpha deploy "$(cat .jazz/app-id)" --schema-dir packages/shared/src/jazz --server-url http://localhost:1625 --admin-secret cwc-rt-admin
 #
 # Override with JAZZ_APP_ID, JAZZ_SERVER_URL, or JAZZ_ADMIN_SECRET.
 set -euo pipefail
