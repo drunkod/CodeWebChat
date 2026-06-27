@@ -9,6 +9,7 @@ import type { JazzConfig } from './jazz-config.js'
 import { app } from '../../../packages/shared/dist/jazz/schema.js'
 import permissions from '../../../packages/shared/dist/jazz/permissions.js'
 import type {
+  BrowserPresenceRow,
   ChatRequestInsert,
   ChatResponseRow
 } from '../../../packages/shared/dist/jazz/schema.js'
@@ -17,28 +18,42 @@ type WaitHandle = {
   wait?: (opts?: { tier?: 'local' | 'edge' | 'global' }) => Promise<unknown>
 }
 
+type JazzChange<T> = { item?: T }
+
 type JazzDb = {
   subscribeAll: (
     queryOrTable: unknown,
     cb: (
-      delta:
-        | { delta?: Array<{ item?: ChatResponseRow }> }
-        | Array<{ item?: ChatResponseRow }>
+      delta: { delta?: Array<{ item?: unknown }> } | Array<{ item?: unknown }>
     ) => void
   ) => (() => void) | Promise<() => void>
+
   insert: (
     table: unknown,
     row: ChatRequestInsert
   ) => WaitHandle | Promise<WaitHandle | unknown>
+
   shutdown?: () => Promise<void>
 }
 
 export type BackendDbFactory = (config: JazzConfig) => Promise<JazzDb>
 
+const BROWSER_PRESENCE_TTL_MS = 15_000
+
+function normalizeDelta<T>(
+  changeSet: { delta?: Array<{ item?: unknown }> } | Array<{ item?: unknown }>
+): Array<JazzChange<T>> {
+  if (Array.isArray(changeSet)) {
+    return changeSet as Array<JazzChange<T>>
+  }
+
+  return (changeSet.delta ?? []) as Array<JazzChange<T>>
+}
+
 export class JazzTransport implements CwcTransport {
   public readonly mode = 'host' as const
   private db: JazzDb | null = null
-  private unsubscribe: (() => void) | null = null
+  private unsubscribes: Array<() => void> = []
   private connected = false
   private browser_seen_at = 0
   private apply_handler: (m: ApplyChatResponseMessage) => void = () => {}
@@ -53,12 +68,14 @@ export class JazzTransport implements CwcTransport {
   onApplyResponse(h: (m: ApplyChatResponseMessage) => void): void {
     this.apply_handler = h
   }
+
   onClose(h: (e?: unknown) => void): void {
     this.close_handler = h
   }
 
   status(): BridgeStatus {
-    const alive = Date.now() - this.browser_seen_at < 15_000
+    const alive = Date.now() - this.browser_seen_at < BROWSER_PRESENCE_TTL_MS
+
     return {
       mode: this.mode,
       hosting: this.connected,
@@ -71,17 +88,18 @@ export class JazzTransport implements CwcTransport {
 
   async connect(): Promise<void> {
     if (this.connected) return
+
     this.db = await this.makeDb(this.config)
-    const maybeUnsubscribe = this.db.subscribeAll(
+
+    const maybeUnsubscribeResponses = this.db.subscribeAll(
       app.chat_responses,
       (changeSet) => {
-        const delta = Array.isArray(changeSet)
-          ? changeSet
-          : (changeSet.delta ?? [])
+        const delta = normalizeDelta<ChatResponseRow>(changeSet)
 
         for (const change of delta) {
           const row = change?.item
           if (!row) continue
+
           const client_id = this.inflight.get(row.request_id)
           if (client_id === undefined) continue
 
@@ -108,7 +126,32 @@ export class JazzTransport implements CwcTransport {
         }
       }
     )
-    this.unsubscribe = await Promise.resolve(maybeUnsubscribe)
+
+    const maybeUnsubscribePresence = this.db.subscribeAll(
+      app.browser_presence,
+      (changeSet) => {
+        const delta = normalizeDelta<BrowserPresenceRow>(changeSet)
+
+        for (const change of delta) {
+          const row = change?.item
+          if (!row) continue
+          if (row.status !== 'online') continue
+
+          const seenAt =
+            typeof row.seen_at === 'number' && Number.isFinite(row.seen_at)
+              ? row.seen_at
+              : Date.now()
+
+          this.browser_seen_at = Math.max(this.browser_seen_at, seenAt)
+        }
+      }
+    )
+
+    this.unsubscribes = [
+      await Promise.resolve(maybeUnsubscribeResponses),
+      await Promise.resolve(maybeUnsubscribePresence)
+    ]
+
     this.connected = true
   }
 
@@ -117,13 +160,16 @@ export class JazzTransport implements CwcTransport {
   }
 
   sendInitializeChat(message: InitializeChatMessage): void {
-    if (!this.db)
+    if (!this.db) {
       throw new CwcMcpError(
         'Jazz transport not connected.',
         'CWC_NOT_CONNECTED'
       )
+    }
+
     const request_id = randomUUID()
     this.inflight.set(request_id, message.client_id)
+
     try {
       const result = this.db.insert(app.chat_requests, {
         request_id,
@@ -147,8 +193,11 @@ export class JazzTransport implements CwcTransport {
   }
 
   async close(): Promise<void> {
-    this.unsubscribe?.()
-    this.unsubscribe = null
+    for (const unsubscribe of this.unsubscribes) {
+      unsubscribe()
+    }
+
+    this.unsubscribes = []
     await this.db?.shutdown?.()
     this.db = null
     this.connected = false
