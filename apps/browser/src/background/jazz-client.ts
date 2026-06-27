@@ -7,16 +7,14 @@ type JazzDb = {
     queryOrTable: unknown,
     cb: (delta: unknown) => void | Promise<void>
   ) => (() => void) | Promise<() => void>
-  // insert/update return a synchronous write handle, NOT a Promise. You must
-  // call .wait({ tier }) on the handle to await durability — `await db.insert(...)`
-  // alone resolves immediately at the local tier and does not confirm the write
-  // reached the sync server.
+
   insert: (
     table: unknown,
     row: unknown
   ) => {
     wait: (opts?: { tier?: 'local' | 'edge' | 'global' }) => Promise<unknown>
   }
+
   update?: (
     table: unknown,
     id: string,
@@ -24,6 +22,7 @@ type JazzDb = {
   ) => {
     wait: (opts?: { tier?: 'local' | 'edge' | 'global' }) => Promise<unknown>
   }
+
   shutdown?: () => Promise<void>
 }
 
@@ -41,6 +40,8 @@ export type JazzClientHandle = {
 const uuidRe =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
 
+const PRESENCE_INTERVAL_MS = 5_000
+
 function normalizeDelta<T>(deltaLike: unknown): Array<JazzChange<T>> {
   if (Array.isArray(deltaLike)) return deltaLike as Array<JazzChange<T>>
 
@@ -55,6 +56,14 @@ function normalizeDelta<T>(deltaLike: unknown): Array<JazzChange<T>> {
   return []
 }
 
+function randomBrowserId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID()
+  }
+
+  return `browser-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
 async function updateRequestStatus(
   db: JazzDb,
   req: ChatRequestRow,
@@ -67,6 +76,26 @@ async function updateRequestStatus(
     await db.update(app.chat_requests, id, { status }).wait({ tier: 'edge' })
   } catch (error) {
     console.warn('Could not update Jazz request status:', error)
+  }
+}
+
+async function writePresence(
+  db: JazzDb,
+  browserId: string,
+  tier: 'local' | 'edge' = 'edge'
+): Promise<void> {
+  try {
+    const now = Date.now()
+    await db
+      .insert(app.browser_presence, {
+        browser_id: browserId,
+        status: 'online',
+        seen_at: now,
+        created_at: now
+      })
+      .wait({ tier })
+  } catch (error) {
+    console.warn('Could not write Jazz browser presence:', error)
   }
 }
 
@@ -102,6 +131,17 @@ export async function startJazzClient(opts: {
     }
   })) as unknown as JazzDb
 
+  const browserId = randomBrowserId()
+
+  // First heartbeat immediately, then repeat. Keep it outside subscription
+  // callbacks, same reason request writes are queued: avoid re-entering Jazz
+  // while it is delivering subscription changes.
+  void writePresence(db, browserId, 'edge')
+
+  const presenceTimer = setInterval(() => {
+    void writePresence(db, browserId, 'edge')
+  }, PRESENCE_INTERVAL_MS)
+
   const processing = new Set<string>()
   const queue: ChatRequestRow[] = []
   let draining = false
@@ -110,6 +150,7 @@ export async function startJazzClient(opts: {
     if (!req.request_id || processing.has(req.request_id)) return
     processing.add(req.request_id)
     queue.push(req)
+
     if (!draining) {
       draining = true
       setTimeout(() => void drainQueue(), 0)
@@ -123,10 +164,12 @@ export async function startJazzClient(opts: {
     try {
       while (queue.length > 0) {
         const req = queue.shift()!
+
         try {
           await updateRequestStatus(db, req, 'claimed')
 
           const response_text = await opts.onRequest(req)
+
           await db
             .insert(app.chat_responses, {
               request_id: req.request_id,
@@ -138,6 +181,9 @@ export async function startJazzClient(opts: {
             .wait({ tier: 'edge' })
 
           await updateRequestStatus(db, req, 'done')
+
+          // A completed response also proves browser presence.
+          void writePresence(db, browserId, 'edge')
         } catch (error) {
           await db
             .insert(app.chat_responses, {
@@ -150,12 +196,16 @@ export async function startJazzClient(opts: {
             .wait({ tier: 'edge' })
 
           await updateRequestStatus(db, req, 'failed')
+
+          // An error response still proves the browser peer is alive.
+          void writePresence(db, browserId, 'edge')
         } finally {
           processing.delete(req.request_id)
         }
       }
     } finally {
       draining = false
+
       if (queue.length > 0) {
         draining = true
         setTimeout(() => void drainQueue(), 0)
@@ -168,6 +218,7 @@ export async function startJazzClient(opts: {
       app.chat_requests.where({ status: 'pending' }),
       (deltaLike: unknown) => {
         const changes = normalizeDelta<ChatRequestRow>(deltaLike)
+
         for (const change of changes) {
           const req = change.item
           if (!req?.request_id) continue
@@ -180,6 +231,7 @@ export async function startJazzClient(opts: {
   return {
     db,
     stop: async () => {
+      clearInterval(presenceTimer)
       unsubscribe()
       await db.shutdown?.()
     }
